@@ -40,6 +40,7 @@ class SyncLoggerFrame(ctk.CTkFrame):
         self._build_plots()
 
     def _build_sidebar(self):
+
         sidebar = ctk.CTkFrame(self, width=280, corner_radius=0)
         sidebar.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         
@@ -60,6 +61,10 @@ class SyncLoggerFrame(ctk.CTkFrame):
         self.name_entry = ctk.CTkEntry(sidebar)
         self.name_entry.insert(0, "Messung")
         self.name_entry.pack(fill="x", padx=15, pady=2)
+        
+        ctk.CTkLabel(sidebar, text="Bericht-Kommentar:", anchor="w", font=ctk.CTkFont(weight="bold")).pack(fill="x", padx=15, pady=(10, 0))
+        self.comment_entry = ctk.CTkEntry(sidebar, placeholder_text="Zusätzliche Notizen...")
+        self.comment_entry.pack(fill="x", padx=15, pady=5)
 
         self.log_fft_var = tk.BooleanVar(value=True)
         self.chk_log_fft = ctk.CTkCheckBox(sidebar, text="FFT & THD mitloggen", variable=self.log_fft_var)
@@ -220,6 +225,12 @@ class SyncLoggerFrame(ctk.CTkFrame):
 
             h5_file = h5py.File(os.path.join(self.log_dir, "datalog.h5"), "w")
             
+            # --- HIER: Mess-Datum und Uhrzeit als Attribute speichern ---
+            now = datetime.now()
+            h5_file.attrs['date'] = now.strftime("%d.%m.%Y")
+            h5_file.attrs['time'] = now.strftime("%H:%M:%S")
+            # -------------------------------------------------------------
+            
             ds_time = h5_file.create_dataset("time", (0,), maxshape=(None,), dtype='f8')
             ds_stats = h5_file.create_dataset("stats", (0, len(self.labels)), maxshape=(None, len(self.labels)), dtype='f8')
             
@@ -355,6 +366,9 @@ class SyncLoggerFrame(ctk.CTkFrame):
                 except: pass
             
             if h5_file is not None:
+                # Kommentar speichern
+                comment = self.comment_entry.get().strip()
+                h5_file.attrs['comment'] = comment if comment else "Kein Kommentar"
                 if event_timestamps:
                     h5_file.create_dataset("events_time", data=np.array(event_timestamps))
                     dt = h5py.string_dtype(encoding='utf-8')
