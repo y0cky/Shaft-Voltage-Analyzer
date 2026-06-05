@@ -1,0 +1,5 @@
+customtkinter
+numpy
+pyvisa
+h5py
+matplotlib
