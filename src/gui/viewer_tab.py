@@ -33,38 +33,85 @@ class SyncViewerFrame(ctk.CTkFrame):
 
         self._build_sidebar()
         self._build_plot()
-
     def show_boxplot(self):
         if self.stat_data is None or len(self.stat_data) == 0:
             messagebox.showwarning("Hinweis", "Keine statistischen Daten geladen.")
             return
 
-        fig, ax = plt.subplots(figsize=(10, 6))
-        fig.patch.set_facecolor('#2b2b2b')
-        ax.set_facecolor('#333333')
+        # 1. Datentypen basierend auf den Labels kategorisieren
+        # Wir erstellen Gruppen: (Name_der_Gruppe, Liste_von_Indizes)
+        groups = {
+            "Spannung / Amplitude": [],
+            "Prozent (z.B. THD)": [],
+            "Anzahl / Pulse": []
+        }
         
-        data_to_plot = [self.stat_data[:, i] for i in range(self.stat_data.shape[1])]
-        
-        num_cols = len(data_to_plot)
         current_labels = self.labels.copy()
+        num_cols = self.stat_data.shape[1]
         
+        # Falls Labels fehlen oder zu viele sind, anpassen
         if len(current_labels) < num_cols:
             for i in range(len(current_labels), num_cols):
                 current_labels.append(f"Var_{i}")
         elif len(current_labels) > num_cols:
             current_labels = current_labels[:num_cols]
-            
-        bp = ax.boxplot(data_to_plot, labels=current_labels, patch_artist=True)
+
+        # Zuordnung zu den physikalischen Einheiten/Typen
+        for idx, label in enumerate(current_labels):
+            label_upper = label.upper()
+            if "THD" in label_upper or "%" in label_upper:
+                groups["Prozent (z.B. THD)"].append(idx)
+            elif "PULSE" in label_upper or "CNT" in label_upper or "ANZAHL" in label_upper:
+                groups["Anzahl / Pulse"].append(idx)
+            else:
+                # Standardmäßig (RMS, MEAN, STD, PEAK) nehmen wir Messamplitude an
+                groups["Spannung / Amplitude"].append(idx)
+
+        # Nur Gruppen behalten, die auch tatsächlich Daten enthalten
+        active_groups = {k: v for k, v in groups.items() if len(v) > 0}
+        num_subplots = len(active_groups)
+
+        # 2. Dynamisches Figuren-Layout erstellen
+        fig, axes = plt.subplots(num_subplots, 1, figsize=(10, 4 * num_subplots), sharex=False)
+        fig.patch.set_facecolor('#2b2b2b')
         
-        for box in bp['boxes']:
-            box.set(facecolor='#1f77b4', color='white', alpha=0.7)
-        for median in bp['medians']:
-            median.set(color='yellow', linewidth=2)
+        # Falls es nur ein Subplot ist, machen wir eine Liste daraus, um iterieren zu können
+        if num_subplots == 1:
+            axes = [axes]
+
+        # 3. Subplots befüllen
+        for ax, (group_name, indices) in zip(axes, active_groups.items()):
+            ax.set_facecolor('#333333')
             
-        ax.set_title("Statistische Verteilung der Messwerte", color='white', fontsize=12)
-        ax.tick_params(colors='white', labelsize=9)
-        plt.xticks(rotation=45, ha='right')
-        plt.grid(True, linestyle=":", alpha=0.3, color='gray')
+            # Daten und Labels für diese spezifische Gruppe extrahieren
+            data_to_plot = [self.stat_data[:, idx] for idx in indices]
+            labels_to_plot = [current_labels[idx] for idx in indices]
+            
+            # Boxplot zeichnen
+            bp = ax.boxplot(data_to_plot, labels=labels_to_plot, patch_artist=True)
+            
+            # Styling der Boxen (dezentere Farben für die Augen)
+            for box in bp['boxes']:
+                box.set(facecolor='#1f77b4', color='white', alpha=0.7)
+            for median in bp['medians']:
+                median.set(color='yellow', linewidth=2)
+            for whisker in bp['whiskers']:
+                whisker.set(color='white', linestyle='--')
+            for cap in bp['caps']:
+                cap.set(color='white')
+            for flier in bp['fliers']:
+                flier.set(marker='o', color='red', alpha=0.5)
+
+            # Achsen-Styling
+            ax.set_ylabel(group_name, color='white', fontsize=10)
+            ax.tick_params(colors='white', labelsize=9)
+            ax.grid(True, linestyle=":", alpha=0.3, color='gray')
+            
+            # Falls Labels zu lang sind, leicht rotieren
+            ax.set_xticklabels(labels_to_plot, rotation=15, ha='right')
+
+        # Gesamttitel für das Fenster
+        fig.suptitle("Statistische Verteilung nach Datentyp", color='white', fontsize=14, weight='bold')
         
         plt.tight_layout()
         plt.show()
