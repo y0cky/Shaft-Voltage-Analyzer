@@ -16,3 +16,6 @@ data/
 # OS generierte Dateien
 .DS_Store
 Thumbs.db
+/build
+/dist
+main.spec

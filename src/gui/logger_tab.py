@@ -87,7 +87,7 @@ class SyncLoggerFrame(ctk.CTkFrame):
         ctk.CTkLabel(sidebar, text="--- Live Werte ---", font=ctk.CTkFont(weight="bold")).pack(pady=(15,5))
         self.val_labels = {}
         for label in self.labels:
-            lbl = ctk.CTkLabel(sidebar, text=f"{label}: ---", font=("Consolas", 11), anchor="w")
+            lbl = ctk.CTkLabel(sidebar, text=f"{label}: ---", font=("Consolas", 14), anchor="w")
             lbl.pack(fill="x", padx=20, pady=1)
             self.val_labels[label] = lbl
 
@@ -149,6 +149,9 @@ class SyncLoggerFrame(ctk.CTkFrame):
         self.btn_event.configure(state="normal")
         self.start_time = time.time()
         
+        # --- ALTE GRAPHEN & DATEN LÖSCHEN ---
+        self._clear_plots()
+        
         user_name = self.name_entry.get().strip() or "Messung"
         timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
         
@@ -157,6 +160,33 @@ class SyncLoggerFrame(ctk.CTkFrame):
         os.makedirs(self.log_dir, exist_ok=True)
         
         threading.Thread(target=self.measurement_thread, daemon=True).start()
+
+    def _clear_plots(self):
+        """Löscht alle internen Datenstrukturen und setzt die Matplotlib-Graphen zurück."""
+        # 1. Interne Datenspeicher leeren
+        self.time_data.clear()
+        for label in self.labels:
+            self.data_storage[label].clear()
+            
+        # 2. Live-Labels in der Sidebar zurücksetzen
+        for label in self.labels:
+            self.val_labels[label].configure(text=f"{label}: ---")
+
+        # 3. Matplotlib-Linien leeren
+        self.line_wave.set_data([], [])
+        self.line_fft_curr.set_data([], [])
+        self.line_fft_avg.set_data([], [])
+        
+        for line in self.lines.values():
+            line.set_data([], [])
+
+        # 4. Achsen-Ansichten zurücksetzen, damit alte Skalierungen verschwinden
+        for ax in [self.ax_wave, self.ax_fft, self.ax_stat, self.ax_peak, self.ax_pulse]:
+            ax.relim()
+            ax.autoscale_view()
+
+        # 5. Canvas einmal leer zeichnen
+        self.canvas.draw_idle()
 
     def stop(self):
         self.running = False
