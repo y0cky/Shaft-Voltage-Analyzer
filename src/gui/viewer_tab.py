@@ -4,10 +4,16 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 import numpy as np
 import h5py
+import base64
+from io import BytesIO
+from datetime import datetime
 
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
+
+# Wichtig für WeasyPrint
+from weasyprint import HTML
 
 class SyncViewerFrame(ctk.CTkFrame):
     def __init__(self, master):
@@ -33,13 +39,13 @@ class SyncViewerFrame(ctk.CTkFrame):
 
         self._build_sidebar()
         self._build_plot()
+
     def show_boxplot(self):
         if self.stat_data is None or len(self.stat_data) == 0:
             messagebox.showwarning("Hinweis", "Keine statistischen Daten geladen.")
             return
 
         # 1. Datentypen basierend auf den Labels kategorisieren
-        # Wir erstellen Gruppen: (Name_der_Gruppe, Liste_von_Indizes)
         groups = {
             "Spannung / Amplitude": [],
             "Prozent (z.B. THD)": [],
@@ -49,14 +55,12 @@ class SyncViewerFrame(ctk.CTkFrame):
         current_labels = self.labels.copy()
         num_cols = self.stat_data.shape[1]
         
-        # Falls Labels fehlen oder zu viele sind, anpassen
         if len(current_labels) < num_cols:
             for i in range(len(current_labels), num_cols):
                 current_labels.append(f"Var_{i}")
         elif len(current_labels) > num_cols:
             current_labels = current_labels[:num_cols]
 
-        # Zuordnung zu den physikalischen Einheiten/Typen
         for idx, label in enumerate(current_labels):
             label_upper = label.upper()
             if "THD" in label_upper or "%" in label_upper:
@@ -64,33 +68,25 @@ class SyncViewerFrame(ctk.CTkFrame):
             elif "PULSE" in label_upper or "CNT" in label_upper or "ANZAHL" in label_upper:
                 groups["Anzahl / Pulse"].append(idx)
             else:
-                # Standardmäßig (RMS, MEAN, STD, PEAK) nehmen wir Messamplitude an
                 groups["Spannung / Amplitude"].append(idx)
 
-        # Nur Gruppen behalten, die auch tatsächlich Daten enthalten
         active_groups = {k: v for k, v in groups.items() if len(v) > 0}
         num_subplots = len(active_groups)
 
-        # 2. Dynamisches Figuren-Layout erstellen
         fig, axes = plt.subplots(num_subplots, 1, figsize=(10, 4 * num_subplots), sharex=False)
         fig.patch.set_facecolor('#2b2b2b')
         
-        # Falls es nur ein Subplot ist, machen wir eine Liste daraus, um iterieren zu können
         if num_subplots == 1:
             axes = [axes]
 
-        # 3. Subplots befüllen
         for ax, (group_name, indices) in zip(axes, active_groups.items()):
             ax.set_facecolor('#333333')
             
-            # Daten und Labels für diese spezifische Gruppe extrahieren
             data_to_plot = [self.stat_data[:, idx] for idx in indices]
             labels_to_plot = [current_labels[idx] for idx in indices]
             
-            # Boxplot zeichnen
             bp = ax.boxplot(data_to_plot, labels=labels_to_plot, patch_artist=True)
             
-            # Styling der Boxen (dezentere Farben für die Augen)
             for box in bp['boxes']:
                 box.set(facecolor='#1f77b4', color='white', alpha=0.7)
             for median in bp['medians']:
@@ -102,15 +98,12 @@ class SyncViewerFrame(ctk.CTkFrame):
             for flier in bp['fliers']:
                 flier.set(marker='o', color='red', alpha=0.5)
 
-            # Achsen-Styling
             ax.set_ylabel(group_name, color='white', fontsize=10)
             ax.tick_params(colors='white', labelsize=9)
             ax.grid(True, linestyle=":", alpha=0.3, color='gray')
             
-            # Falls Labels zu lang sind, leicht rotieren
             ax.set_xticklabels(labels_to_plot, rotation=15, ha='right')
 
-        # Gesamttitel für das Fenster
         fig.suptitle("Statistische Verteilung nach Datentyp", color='white', fontsize=14, weight='bold')
         
         plt.tight_layout()
@@ -157,7 +150,207 @@ class SyncViewerFrame(ctk.CTkFrame):
             self.val_labels[label] = lbl
 
         ctk.CTkButton(self.sidebar, text="Statistik-Boxplot anzeigen", 
-                      command=self.show_boxplot, fg_color="#444444").pack(fill="x", padx=15, pady=20)
+                      command=self.show_boxplot, fg_color="#444444").pack(fill="x", padx=15, pady=10)
+
+        # --- PDF Export Button ---
+        ctk.CTkButton(self.sidebar, text="📄 PDF Report generieren", 
+                      command=self.export_pdf, fg_color="#2b6cb0", hover_color="#1a365d", 
+                      font=ctk.CTkFont(weight="bold")).pack(fill="x", padx=15, pady=15)
+
+    def export_pdf(self):
+        if self.stat_data is None or len(self.stat_data) == 0:
+            messagebox.showwarning("Fehler", "Keine Daten geladen. Bitte lade zuerst einen Log-Ordner.")
+            return
+
+        # 1. Metadaten & Zeitstempel holen
+        current_date = datetime.now().strftime("%d.%m.%Y %H:%M")
+        total_epochs = len(self.time_data)
+        total_time = self.time_data[-1] if total_epochs > 0 else 0
+        x_inc_str = f"{self.x_inc} s"
+        
+        # 2. Reale Statistiken zeilenweise für das HTML-Template berechnen
+        stats_html = ""
+        for i, label in enumerate(self.labels):
+            if i < self.stat_data.shape[1]:
+                mean_val = self.stat_data[:, i].mean()
+                min_val = self.stat_data[:, i].min()
+                max_val = self.stat_data[:, i].max()
+                std_val = self.stat_data[:, i].std()
+                
+                unit = "%" if "THD" in label else "V"
+                if "PULSE" in label.upper() or "CNT" in label.upper(): unit = "Anzahl"
+                
+                stats_html += f"""
+                <tr>
+                    <td><strong>{label}</strong></td>
+                    <td>{min_val:.3f}</td>
+                    <td>{max_val:.3f}</td>
+                    <td>{mean_val:.3f}</td>
+                    <td>{std_val:.3f}</td>
+                    <td>{unit}</td>
+                </tr>
+                """
+
+        # 3. Vorhandene Log-Events auslesen und formatieren
+        events_html = ""
+        if len(self.events_time) > 0:
+            for t, txt in zip(self.events_time[:15], self.events_text[:15]):
+                decoded_txt = txt.decode('utf-8') if isinstance(txt, bytes) else txt
+                events_html += f"""
+                <tr>
+                    <td>{t:.1f} s</td>
+                    <td><span class="badge badge-info">System</span></td>
+                    <td>{decoded_txt}</td>
+                </tr>
+                """
+        else:
+            events_html = "<tr><td colspan='3' style='text-align:center; color:gray;'>Keine System-Events aufgezeichnet.</td></tr>"
+
+        # 4. Graphen-Inhalt für den Druck vorbereiten (Dunkles Theme für den Export invertieren)
+        buf = BytesIO()
+        orig_fig_color = self.fig.get_facecolor()
+        
+        # temporär Farben für Drucklesbarkeit anpassen
+        self.fig.patch.set_facecolor('#ffffff')
+        for ax in [self.ax_wave, self.ax, self.ax_waterfall]:
+            ax.set_facecolor('#ffffff')
+            ax.title.set_color('#1a365d')
+            ax.xaxis.label.set_color('#2d3748')
+            ax.yaxis.label.set_color('#2d3748')
+            ax.tick_params(colors='#2d3748')
+        
+        self.canvas.draw()
+        self.fig.savefig(buf, format="png", bbox_inches='tight', dpi=140, facecolor='#ffffff')
+        
+        # Ansicht in der GUI sofort wieder zurück auf Dark-Theme setzen
+        self.fig.patch.set_facecolor(orig_fig_color)
+        for ax in [self.ax_wave, self.ax, self.ax_waterfall]:
+            ax.set_facecolor('#2b2b2b' if ax != self.ax_waterfall else '#ffffff') # Waterfall behält mesh
+            ax.title.set_color('black') # falls du Standard-Matplotlib nutzt
+            ax.tick_params(colors='black')
+        self.canvas.draw_idle()
+        
+        buf.seek(0)
+        img_base64 = base64.b64encode(buf.read()).decode('utf-8')
+        graphs_uri = f"data:image/png;base64,{img_base64}"
+
+        # 5. CSS Struktur (Definiert exakt das gewünschte A4-Druckbild)
+        css = """
+        @page {
+            size: A4;
+            margin: 20mm 15mm;
+            @bottom-right { content: "Seite " counter(page) " von " counter(pages); font-family: sans-serif; font-size: 8.5pt; color: #718096; }
+            @bottom-left { content: "Sync Offline Viewer — Analysebericht"; font-family: sans-serif; font-size: 8.5pt; color: #718096; }
+        }
+        body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #2d3748; line-height: 1.6; font-size: 10pt; margin: 0; background-color: #ffffff; }
+        *, *::before, *::after { box-sizing: border-box; }
+        .header-table { width: 100%; border-collapse: collapse; margin-bottom: 25px; border-bottom: 3px solid #2b6cb0; }
+        .header-table td { padding-bottom: 15px; vertical-align: bottom; }
+        .report-title { font-size: 24pt; color: #1a365d; margin: 0; font-weight: 700; letter-spacing: -0.5px; line-height: 1.1; }
+        .report-subtitle { font-size: 10.5pt; color: #4a5568; margin: 5px 0 0 0; text-transform: uppercase; letter-spacing: 1.5px; font-weight: 600; }
+        .meta-table { width: 100%; margin-bottom: 30px; border-collapse: collapse; background-color: #f7fafc; border: 1px solid #e2e8f0; }
+        .meta-table td { padding: 10px 14px; font-size: 9.5pt; border-bottom: 1px solid #e2e8f0; }
+        .meta-label { font-weight: bold; color: #4a5568; width: 28%; background-color: #edf2f7; }
+        h2 { font-size: 14pt; color: #1a365d; border-left: 4px solid #2b6cb0; padding-left: 10px; margin-top: 30px; margin-bottom: 15px; page-break-after: avoid; }
+        p { color: #4a5568; text-align: justify; }
+        .stats-table, .event-table { width: 100%; border-collapse: collapse; margin-bottom: 25px; }
+        .stats-table th, .event-table th { background-color: #2b6cb0; color: white; text-align: left; padding: 10px; font-size: 9.5pt; font-weight: 600; }
+        .event-table th { background-color: #4a5568; }
+        .stats-table td, .event-table td { padding: 9px; border: 1px solid #e2e8f0; font-size: 9.5pt; }
+        .stats-table tr:nth-child(even), .event-table tr:nth-child(even) { background-color: #f7fafc; }
+        .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 8pt; font-weight: bold; text-transform: uppercase; background-color: #ebf8ff; color: #2b6cb0; }
+        .chart-box { border: 1px solid #e2e8f0; padding: 15px; margin-bottom: 25px; text-align: center; page-break-inside: avoid; }
+        .chart-title { font-size: 10pt; font-weight: bold; color: #2d3748; margin-bottom: 12px; text-align: left; }
+        .img-fluid { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+        """
+
+        # 6. HTML Konstruktion mit eingebetteten Datenfeldern
+        html_content = f"""
+        <!DOCTYPE html>
+        <html lang="de">
+        <head>
+            <meta charset="UTF-8">
+            <style>{css}</style>
+        </head>
+        <body>
+            <table class="header-table">
+                <tr>
+                    <td>
+                        <div class="report-title">Sync Offline Viewer</div>
+                        <div class="report-subtitle">Automatisierter Mess- und Analysebericht</div>
+                    </td>
+                    <td style="text-align: right; color: #718096; font-size: 9.5pt;">
+                        Generiert am: {current_date}<br>
+                        Status: <span class="badge">Abgeschlossen</span>
+                    </td>
+                </tr>
+            </table>
+
+            <h2>1. Allgemeine Systemmetadaten</h2>
+            <table class="meta-table">
+                <tr><td class="meta-label">Analysierte Datei</td><td>datalog.h5</td></tr>
+                <tr><td class="meta-label">Anzahl Datenpunkte</td><td>{total_epochs} Zeitfenster (Epochen)</td></tr>
+                <tr><td class="meta-label">Abtastintervall (x_inc)</td><td>{x_inc_str}</td></tr>
+                <tr><td class="meta-label">Gesamte Messdauer</td><td>{total_time:.2f} Sekunden</td></tr>
+            </table>
+
+            <h2>2. Statistische Kennwerte (Gesamtmessung)</h2>
+            <table class="stats-table">
+                <thead>
+                    <tr>
+                        <th>Messgröße (Label)</th><th>Minimalwert</th><th>Maximalwert</th><th>Mittelwert (&mu;)</th><th>Standardabw. (&sigma;)</th><th>Einheit</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {stats_html}
+                </tbody>
+            </table>
+
+            <div style="page-break-after: always;"></div>
+
+            <h2>3. Signal- und Frequenzanalyse</h2>
+            <p>Die nachfolgenden Diagramme dokumentieren den Zustand des aktuell in der Software angewählten Datenpunkts (Datenfenster-Index: {self.current_index} bei relativer Systemzeit: {self.time_data[self.current_index]:.2f}s).</p>
+            <div class="chart-box">
+                <div class="chart-title">Wellenform, FFT Spektrum & Spektrogramm</div>
+                <img src="{graphs_uri}" class="img-fluid" />
+            </div>
+
+            <h2>4. Protokollierte System-Events (Auszug)</h2>
+            <table class="event-table">
+                <thead>
+                    <tr><th style="width: 15%;">Zeitstempel</th><th style="width: 20%;">Typ</th><th>Event-Text / Beschreibung</th></tr>
+                </thead>
+                <tbody>
+                    {events_html}
+                </tbody>
+            </table>
+            
+            <table style="width: 100%; margin-top: 40px; page-break-inside: avoid;">
+                <tr>
+                    <td style="width: 50%; border-top: 1px solid #a0aec0; padding-top: 8px;">
+                        <font style="font-size: 9pt; color: #718096;">Automatisches Prüfsystem</font><br>
+                        <strong>Sync Offline Viewer Engine</strong>
+                    </td>
+                    <td style="width: 50%;"></td>
+                </tr>
+            </table>
+        </body>
+        </html>
+        """
+
+        # 7. Rendering zu PDF
+        output_filename = f"Messbericht_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        output_path = os.path.join(os.getcwd(), output_filename)
+        
+        try:
+            HTML(string=html_content).write_pdf(output_path)
+            messagebox.showinfo("Erfolg", f"Report erfolgreich generiert:\n{output_path}")
+            
+            if os.name == 'nt':
+                os.startfile(output_path)
+                
+        except Exception as e:
+            messagebox.showerror("Export Fehler", f"Das PDF konnte nicht erstellt werden.\nFehler: {e}")
 
     def _build_plot(self):
         self.plot_frame = ctk.CTkFrame(self, corner_radius=10)
@@ -193,7 +386,6 @@ class SyncViewerFrame(ctk.CTkFrame):
         self.canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
 
     def load_log_folder(self):
-        # Zeige standardmäßig den data-Ordner an, falls vorhanden
         initial_dir = os.path.join(os.getcwd(), "data") if os.path.exists("data") else "/"
         folder_path = filedialog.askdirectory(initialdir=initial_dir)
         if not folder_path: return
@@ -270,11 +462,8 @@ class SyncViewerFrame(ctk.CTkFrame):
         dec = 10 if len(freq_scale) > 2000 else 1 
         
         X, Y = np.meshgrid(freq_scale[::dec], self.time_data)
-        
-        mesh = self.ax_waterfall.pcolormesh(X, Y, self.fft_data[:, ::dec], shading='nearest', cmap='viridis')
-        
+        self.ax_waterfall.pcolormesh(X, Y, self.fft_data[:, ::dec], shading='nearest', cmap='viridis')
         self.waterfall_line = self.ax_waterfall.axhline(self.time_data[0], color='red', linewidth=2)
-        
         self.ax_waterfall.set_title("Spektrogramm (Wasserfall)")
         self.canvas.draw_idle()
 
@@ -340,9 +529,7 @@ class SyncViewerFrame(ctk.CTkFrame):
                 
         if self.wave_data is not None and index < len(self.wave_data):
             wave = self.wave_data[index]
-            
             x = np.arange(len(wave)) * self.x_inc * 1000
-            
             dec = 2 if len(wave) > 5000 else 1
             self.line_wave.set_data(x[::dec], wave[::dec])
             self.ax_wave.set_xlim(x[0], x[-1])
