@@ -164,17 +164,27 @@ class SyncReportFrame(ctk.CTkFrame):
         mat_wo = m_wo["wave_matrix"][:min_rows, :min_len:dec_x]
         mat_w = m_w["wave_matrix"][:min_rows, :min_len:dec_x]
         
-        v_min_global = min(mat_wo.min(), mat_w.min())
-        v_max_global = max(mat_wo.max(), mat_w.max())
-        v_abs_max = max(abs(v_min_global), abs(v_max_global))
+        # --- START DER OPTIMIERUNG FÜR DAS OSZILLOGRAMM ---
+        # 99.5-Perzentil statt absolutes Maximum ignoriert einzelne Ausreißer
+        v_limit_wo = np.percentile(np.abs(mat_wo), 99.5)
+        v_limit_w  = np.percentile(np.abs(mat_w), 99.5)
+        
+        v_abs_max = max(v_limit_wo, v_limit_w)
+        
+        # Verhindert, dass reines Rauschen bei perfekten Messungen extrem verstärkt wird
+        if v_abs_max < 0.01: 
+            v_abs_max = 0.01
+        # --- ENDE DER OPTIMIERUNG ---
 
         ax3 = fig.add_subplot(312)
-        ax3.pcolormesh(X, Y, mat_wo, shading="nearest", cmap="coolwarm", vmin=-v_abs_max, vmax=v_abs_max)
+        # rasterized=True hinzugefügt
+        ax3.pcolormesh(X, Y, mat_wo, shading="nearest", cmap="coolwarm", vmin=-v_abs_max, vmax=v_abs_max, rasterized=True)
         ax3.set_ylabel("Mess-Zeitpunkt (s)", fontweight="bold")
         ax3.set_title("2. Oszillogramm-Historie - OHNE Ableitsystem", fontsize=12, fontweight="bold", color="#1a365d")
 
         ax4 = fig.add_subplot(313)
-        ax4.pcolormesh(X, Y, mat_w, shading="nearest", cmap="coolwarm", vmin=-v_abs_max, vmax=v_abs_max)
+        # rasterized=True hinzugefügt
+        ax4.pcolormesh(X, Y, mat_w, shading="nearest", cmap="coolwarm", vmin=-v_abs_max, vmax=v_abs_max, rasterized=True)
         ax4.set_xlabel("Zeit (ms)", fontweight="bold")
         ax4.set_ylabel("Mess-Zeitpunkt (s)", fontweight="bold")
         ax4.set_title("3. Oszillogramm-Historie - MIT Ableitsystem", fontsize=12, fontweight="bold", color="#1a365d")
@@ -192,9 +202,7 @@ class SyncReportFrame(ctk.CTkFrame):
         return f"data:image/png;base64,{base64.b64encode(buf.read()).decode('utf-8')}"
 
     def _generate_fft_plots(self, m_wo, m_w):
-        fig = plt.figure(figsize=(10, 22), constrained_layout=True)
-        fig.patch.set_facecolor("#ffffff")
-        
+        # Gemeinsame Vorbereitungen
         freq_scale = m_wo["freq"] / 1e3 if m_wo["freq"][-1] >= 1e5 else m_wo["freq"]
         x_label = "Frequenz (kHz)" if m_wo["freq"][-1] >= 1e5 else "Frequenz (Hz)"
         
@@ -209,51 +217,73 @@ class SyncReportFrame(ctk.CTkFrame):
         vmin = min(mat_wo.min(), mat_w.min())
         vmax = max(mat_wo.max(), mat_w.max())
 
-        ax1 = fig.add_subplot(511)
+        # ==========================================
+        # BILD 1: Liniendiagramme (Overlay & Dämpfung)
+        # ==========================================
+        fig1 = plt.figure(figsize=(10, 8), constrained_layout=True)
+        fig1.patch.set_facecolor("#ffffff")
+
+        ax1 = fig1.add_subplot(211)
         ax1.plot(freq_scale, m_wo["fft_avg"], color="#e53e3e", alpha=0.7, label="Ref. Ohne Ableitsystem", linewidth=1.2)
         ax1.plot(freq_scale, m_w["fft_avg"], color="#2b6cb0", alpha=0.8, label="Opt. Mit Ableitsystem", linewidth=1.2)
         ax1.set_ylabel("Amplitude (dB)", fontweight="bold")
         ax1.set_title("1. Gemitteltes Frequenzspektrum (FFT Overlay)", fontsize=12, fontweight="bold", color="#1a365d")
         ax1.legend(loc="upper right")
 
-        ax2 = fig.add_subplot(512)
+        ax2 = fig1.add_subplot(212)
         damping_db = m_wo["fft_avg"] - m_w["fft_avg"]
         ax2.fill_between(freq_scale, 0, damping_db, where=(damping_db >= 0), color='#48bb78', alpha=0.5, label="Dämpfungsgewinn")
         ax2.fill_between(freq_scale, 0, damping_db, where=(damping_db < 0), color='#f56565', alpha=0.5, label="Pegelerhöhung")
         ax2.plot(freq_scale, damping_db, color='#2d3748', linewidth=1)
+        ax2.set_xlabel(x_label, fontweight='bold')
         ax2.set_ylabel("Dämpfung (dB)", fontweight='bold')
         ax2.set_title("2. Spektrales Dämpfungsprofil (Differenz Ref - Opt)", fontsize=12, fontweight='bold', color='#1a365d')
         ax2.legend(loc="upper right")
 
-        ax3 = fig.add_subplot(513)
+        for ax in [ax1, ax2]:
+            ax.set_xlim(freq_scale[0], freq_scale[-1])
+            ax.tick_params(colors="#2d3748", labelsize=9)
+            ax.grid(True, linestyle=":", alpha=0.6, color="#a0aec0")
+
+        buf1 = BytesIO()
+        fig1.savefig(buf1, format="png", bbox_inches="tight", dpi=140, facecolor="#ffffff")
+        plt.close(fig1)
+        b64_1 = f"data:image/png;base64,{base64.b64encode(buf1.getvalue()).decode('utf-8')}"
+
+        # ==========================================
+        # BILD 2: Spektrogramme (Matrizen) -> mit rasterized=True !
+        # ==========================================
+        fig2 = plt.figure(figsize=(10, 14), constrained_layout=True)
+        fig2.patch.set_facecolor("#ffffff")
+
+        ax3 = fig2.add_subplot(311)
         diff_matrix = mat_wo - mat_w
         vmax_diff = np.max(np.abs(diff_matrix))
-        ax3.pcolormesh(X, Y, diff_matrix, shading='nearest', cmap='bwr', vmin=-vmax_diff, vmax=vmax_diff)
+        ax3.pcolormesh(X, Y, diff_matrix, shading='nearest', cmap='bwr', vmin=-vmax_diff, vmax=vmax_diff, rasterized=True)
         ax3.set_ylabel("Zeit (s)", fontweight='bold')
         ax3.set_title("3. Differenz-Spektrogramm (Ref - Opt)", fontsize=12, fontweight='bold', color='#1a365d')
 
-        ax4 = fig.add_subplot(514)
-        ax4.pcolormesh(X, Y, mat_wo, shading="nearest", cmap="turbo", vmin=vmin, vmax=vmax)
+        ax4 = fig2.add_subplot(312)
+        ax4.pcolormesh(X, Y, mat_wo, shading="nearest", cmap="turbo", vmin=vmin, vmax=vmax, rasterized=True)
         ax4.set_ylabel("Zeit (s)", fontweight="bold")
         ax4.set_title("4. Spektrogramm / Wasserfall - OHNE Ableitsystem", fontsize=12, fontweight="bold", color="#1a365d")
 
-        ax5 = fig.add_subplot(515)
-        ax5.pcolormesh(X, Y, mat_w, shading="nearest", cmap="turbo", vmin=vmin, vmax=vmax)
+        ax5 = fig2.add_subplot(313)
+        ax5.pcolormesh(X, Y, mat_w, shading="nearest", cmap="turbo", vmin=vmin, vmax=vmax, rasterized=True)
         ax5.set_xlabel(x_label, fontweight="bold")
         ax5.set_ylabel("Zeit (s)", fontweight="bold")
         ax5.set_title("5. Spektrogramm / Wasserfall - MIT Ableitsystem", fontsize=12, fontweight="bold", color="#1a365d")
 
-        for ax in [ax1, ax2, ax3, ax4, ax5]:
+        for ax in [ax3, ax4, ax5]:
             ax.set_xlim(freq_scale[0], freq_scale[-1])
             ax.tick_params(colors="#2d3748", labelsize=9)
-            if ax in [ax1, ax2]:
-                ax.grid(True, linestyle=":", alpha=0.6, color="#a0aec0")
-        
-        buf = BytesIO()
-        fig.savefig(buf, format="png", bbox_inches="tight", dpi=140, facecolor="#ffffff")
-        plt.close(fig)
-        buf.seek(0)
-        return f"data:image/png;base64,{base64.b64encode(buf.read()).decode('utf-8')}"
+
+        buf2 = BytesIO()
+        fig2.savefig(buf2, format="png", bbox_inches="tight", dpi=140, facecolor="#ffffff")
+        plt.close(fig2)
+        b64_2 = f"data:image/png;base64,{base64.b64encode(buf2.getvalue()).decode('utf-8')}"
+
+        return b64_1, b64_2
 
     def generate_full_report(self):
         if not self.path_without or not self.path_with:
@@ -277,7 +307,7 @@ class SyncReportFrame(ctk.CTkFrame):
             avg_broadband_damping = np.mean(damping_profile)
 
             wave_chart_b64 = self._generate_wave_plots(w_wo, w_w)
-            fft_chart_b64 = self._generate_fft_plots(f_wo, f_w)
+            fft_chart1_b64, fft_chart2_b64 = self._generate_fft_plots(f_wo, f_w)
 
             user_comment = self.txt_comment.get() if self.txt_comment.get() else "Kombinierte Zeitbereichs- & Spektralanalyse"
             current_time_str = datetime.now().strftime("%d.%m.%Y %H:%M")
@@ -301,7 +331,7 @@ class SyncReportFrame(ctk.CTkFrame):
             .compare-table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
             .compare-table th { background-color: #edf2f7; color: #2d3748; text-align: left; padding: 8px; font-size: 9.5pt; font-weight: 600; border-bottom: 2px solid #cbd5e0; }
             .compare-table td { padding: 8px; border-bottom: 1px solid #e2e8f0; font-size: 9.5pt; }
-            .chart-box { border: 1px solid #e2e8f0; padding: 10px; margin-top: 10px; text-align: center; }
+            .chart-box { border: 1px solid #e2e8f0; padding: 10px; margin-top: 10px; text-align: center; page-break-inside: avoid; break-inside: avoid; }
             .img-fluid { max-width: 100%; height: auto; display: block; margin: 0 auto; }
             .page-break { page-break-before: always; }
             """
@@ -347,7 +377,7 @@ class SyncReportFrame(ctk.CTkFrame):
                 <div class="chart-box"><img src="{wave_chart_b64}" class="img-fluid" /></div>
 
                 <div class="page-break"></div>
-                <h2>2. Spektralanalyse (FFT)</h2>
+                <h2>2. Spektralanalyse (FFT) - Pegel & Dämpfung</h2>
                 <table class="compare-table">
                     <thead><tr><th>Parameter</th><th>Ohne Ableitsystem (Ref.)</th><th>Mit Ableitsystem (Opt.)</th></tr></thead>
                     <tbody>
@@ -355,7 +385,12 @@ class SyncReportFrame(ctk.CTkFrame):
                         <tr><td><strong>Absoluter Spektral-Peak</strong></td><td>{np.max(f_wo["fft_avg"]):.1f} dB</td><td>{np.max(f_w["fft_avg"]):.1f} dB</td></tr>
                     </tbody>
                 </table>
-                <div class="chart-box"><img src="{fft_chart_b64}" class="img-fluid" /></div>
+                <div class="chart-box"><img src="{fft_chart1_b64}" class="img-fluid" /></div>
+
+                <div class="page-break"></div>
+                
+                <h2>3. Spektralanalyse (FFT) - Spektrogramme</h2>
+                <div class="chart-box"><img src="{fft_chart2_b64}" class="img-fluid" /></div>
             </body>
             </html>
             """
