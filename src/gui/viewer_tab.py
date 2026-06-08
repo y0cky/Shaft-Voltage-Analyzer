@@ -106,6 +106,173 @@ class SyncViewerFrame(ctk.CTkFrame):
         
         plt.tight_layout()
         plt.show()
+        
+    def _generate_time_plots_base64_for_pdf(self):
+        """Generiert die zeitlichen Verläufe der Messgrößen in 4 Subplots für den PDF-Bericht."""
+        if self.stat_data is None or len(self.stat_data) == 0 or self.time_data is None or len(self.time_data) == 0:
+            return ""
+
+        # Erstelle ein hohes Figure-Objekt für 4 Subplots untereinander mit geteilter X-Achse
+        fig, axes = plt.subplots(4, 1, figsize=(10, 12), sharex=True)
+        fig.patch.set_facecolor('#ffffff')
+
+        # Indizes dynamisch anhand der Labels zuordnen
+        lbl_indices = {lbl.upper(): idx for idx, lbl in enumerate(self.labels)}
+        
+        def get_data(name, fallback_idx):
+            for k, v in lbl_indices.items():
+                if name in k:
+                    return self.stat_data[:, v], self.labels[v]
+            if fallback_idx < self.stat_data.shape[1]:
+                return self.stat_data[:, fallback_idx], self.labels[fallback_idx]
+            return None, name
+
+        t = self.time_data
+
+        # Subplot 1: RMS, Mean, Std (zusammen in einem Diagramm)
+        ax1 = axes[0]
+        ax1.set_facecolor('#ffffff')
+        rms_d, rms_l = get_data("RMS", 0)
+        mean_d, mean_l = get_data("MEAN", 1)
+        std_d, std_l = get_data("STD", 2)
+        
+        if rms_d is not None: ax1.plot(t, rms_d, label=rms_l, color='#1f77b4', linewidth=1.5)
+        if mean_d is not None: ax1.plot(t, mean_d, label=mean_l, color='#2ca02c', linewidth=1.5)
+        if std_d is not None: ax1.plot(t, std_d, label=std_l, color='#9467bd', linewidth=1.5)
+        ax1.set_ylabel("Spannung (V)", color='#2d3748')
+        ax1.title.set_text("Statistische Kennwerte (RMS, Mean, Std)")
+        ax1.legend(loc="upper right")
+
+        # Subplot 2: Spitzenwerte (Peak+, Peak- in eigenem Diagramm)
+        ax2 = axes[1]
+        ax2.set_facecolor('#ffffff')
+        p_pos_d, p_pos_l = get_data("PEAK+", 3)
+        p_neg_d, p_neg_l = get_data("PEAK-", 4)
+        if p_pos_d is not None: ax2.plot(t, p_pos_d, label=p_pos_l, color='#e53e3e', linewidth=1.5)
+        if p_neg_d is not None: ax2.plot(t, p_neg_d, label=p_neg_l, color='#ff7f0e', linewidth=1.5)
+        ax2.set_ylabel("Spannung (V)", color='#2d3748')
+        ax2.title.set_text("Spitzenwerte (Peak+, Peak-)")
+        ax2.legend(loc="upper right")
+
+        # Subplot 3: Impulse (Pos_pulse, Neg_pulse in eigenem Diagramm)
+        ax3 = axes[2]
+        ax3.set_facecolor('#ffffff')
+        pulse_pos_d, pulse_pos_l = get_data("POS_PULSE", 5)
+        pulse_neg_d, pulse_neg_l = get_data("NEG_PULSE", 6)
+        if pulse_pos_d is not None: ax3.plot(t, pulse_pos_d, label=pulse_pos_l, color='#17a2b8', linewidth=1.2)
+        if pulse_neg_d is not None: ax3.plot(t, pulse_neg_d, label=pulse_neg_l, color='#6610f2', linewidth=1.2)
+        ax3.set_ylabel("Anzahl", color='#2d3748')
+        ax3.title.set_text("Impulszähler (Pos. / Neg. Pulse)")
+        ax3.legend(loc="upper right")
+
+        # Subplot 4: THD (in eigenem Diagramm)
+        ax4 = axes[3]
+        ax4.set_facecolor('#ffffff')
+        thd_d, thd_l = get_data("THD", 7)
+        if thd_d is not None: ax4.plot(t, thd_d, label=thd_l, color='#d62728', linewidth=1.5)
+        ax4.set_ylabel("Klirrfaktor (%)", color='#2d3748')
+        ax4.set_xlabel("Zeit (s)", color='#2d3748')
+        ax4.title.set_text("Total Harmonic Distortion (THD)")
+        ax4.legend(loc="upper right")
+
+        # Formatierung für alle Achsen einheitlich anwenden
+        for ax in axes:
+            ax.tick_params(colors='#2d3748', labelsize=9)
+            ax.grid(True, linestyle=":", alpha=0.6, color='#a0aec0')
+            ax.title.set_color('#1a365d')
+            ax.title.set_weight('bold')
+            ax.title.set_fontsize(11)
+
+        plt.tight_layout()
+        
+        # In Speicher-Buffer schreiben und als Base64 kodieren
+        buf = BytesIO()
+        fig.savefig(buf, format="png", bbox_inches='tight', dpi=140, facecolor='#ffffff')
+        plt.close(fig) # Wichtig, um UI-Ressourcen freizugeben
+        
+        buf.seek(0)
+        img_base64 = base64.b64encode(buf.read()).decode('utf-8')
+        return f"data:image/png;base64,{img_base64}"
+        
+    def _generate_boxplot_base64_for_pdf(self):
+        """Generiert den Boxplot im hellen Theme im Hintergrund und gibt ihn als Base64-String zurück."""
+        if self.stat_data is None or len(self.stat_data) == 0:
+            return ""
+
+        # Datentypen kategorisieren
+        groups = {
+            "Spannung / Amplitude": [],
+            "Prozent (z.B. THD)": [],
+            "Anzahl / Pulse": []
+        }
+        
+        current_labels = self.labels.copy()
+        num_cols = self.stat_data.shape[1]
+        
+        if len(current_labels) < num_cols:
+            for i in range(len(current_labels), num_cols):
+                current_labels.append(f"Var_{i}")
+        elif len(current_labels) > num_cols:
+            current_labels = current_labels[:num_cols]
+
+        for idx, label in enumerate(current_labels):
+            label_upper = label.upper()
+            if "THD" in label_upper or "%" in label_upper:
+                groups["Prozent (z.B. THD)"].append(idx)
+            elif "PULSE" in label_upper or "CNT" in label_upper or "ANZAHL" in label_upper:
+                groups["Anzahl / Pulse"].append(idx)
+            else:
+                groups["Spannung / Amplitude"].append(idx)
+
+        active_groups = {k: v for k, v in groups.items() if len(v) > 0}
+        num_subplots = len(active_groups)
+        
+        if num_subplots == 0:
+            return ""
+
+        # Plot mit weißem Hintergrund für PDF erstellen
+        fig, axes = plt.subplots(num_subplots, 1, figsize=(10, 4 * num_subplots), sharex=False)
+        fig.patch.set_facecolor('#ffffff') 
+        
+        if num_subplots == 1:
+            axes = [axes]
+
+        for ax, (group_name, indices) in zip(axes, active_groups.items()):
+            ax.set_facecolor('#ffffff')
+            
+            data_to_plot = [self.stat_data[:, idx] for idx in indices]
+            labels_to_plot = [current_labels[idx] for idx in indices]
+            
+            bp = ax.boxplot(data_to_plot, labels=labels_to_plot, patch_artist=True)
+            
+            # Print-freundliche (helle) Farben
+            for box in bp['boxes']:
+                box.set(facecolor='#2b6cb0', color='#1a365d', alpha=0.7)
+            for median in bp['medians']:
+                median.set(color='#e53e3e', linewidth=2)
+            for whisker in bp['whiskers']:
+                whisker.set(color='#2d3748', linestyle='--')
+            for cap in bp['caps']:
+                cap.set(color='#2d3748')
+            for flier in bp['fliers']:
+                flier.set(marker='o', color='#e53e3e', alpha=0.5)
+
+            ax.set_ylabel(group_name, color='#2d3748', fontsize=10)
+            ax.tick_params(colors='#2d3748', labelsize=9)
+            ax.grid(True, linestyle=":", alpha=0.6, color='#a0aec0')
+            ax.set_xticklabels(labels_to_plot, rotation=15, ha='right')
+
+        fig.suptitle("Statistische Verteilung nach Datentyp", color='#1a365d', fontsize=14, weight='bold')
+        plt.tight_layout()
+        
+        # In Buffer speichern und Base64 generieren
+        buf = BytesIO()
+        fig.savefig(buf, format="png", bbox_inches='tight', dpi=140, facecolor='#ffffff')
+        plt.close(fig) # Wichtig: Verhindert Memory Leak und dass sich ein neues Fenster öffnet!
+        
+        buf.seek(0)
+        img_base64 = base64.b64encode(buf.read()).decode('utf-8')
+        return f"data:image/png;base64,{img_base64}"
 
     def _build_sidebar(self):
         self.sidebar = ctk.CTkFrame(self, width=280, corner_radius=0)
@@ -161,7 +328,6 @@ class SyncViewerFrame(ctk.CTkFrame):
             return
 
         # 1. Metadaten & Zeitstempel holen
-        
         current_date = datetime.now().strftime("%d.%m.%Y %H:%M")
         total_epochs = len(self.time_data)
         total_time = self.time_data[-1] if total_epochs > 0 else 0
@@ -171,10 +337,8 @@ class SyncViewerFrame(ctk.CTkFrame):
         current_date = datetime.now().strftime("%d.%m.%Y")
         current_time = datetime.now().strftime("%H:%M")
         
-        # In load_log_folder():
         self.mess_kommentar = self.h5_file.attrs.get('comment', 'Kein Kommentar hinterlegt.')
         
-        # Verstrichene Zeit aus den geladenen Daten (letzter Zeitwert)
         elapsed_seconds = self.time_data[-1] if len(self.time_data) > 0 else 0
         minutes = int(elapsed_seconds // 60)
         seconds = int(elapsed_seconds % 60)
@@ -221,11 +385,10 @@ class SyncViewerFrame(ctk.CTkFrame):
         else:
             events_html = "<tr><td colspan='3' style='text-align:center; color:gray;'>Keine System-Events aufgezeichnet.</td></tr>"
 
-        # 4. Graphen-Inhalt für den Druck vorbereiten (Dunkles Theme für den Export invertieren)
+        # 4. Graphen-Inhalt für aktuellen Punkt für den Druck vorbereiten
         buf = BytesIO()
         orig_fig_color = self.fig.get_facecolor()
         
-        # temporär Farben für Drucklesbarkeit anpassen
         self.fig.patch.set_facecolor('#ffffff')
         for ax in [self.ax_wave, self.ax, self.ax_waterfall]:
             ax.set_facecolor('#ffffff')
@@ -237,10 +400,9 @@ class SyncViewerFrame(ctk.CTkFrame):
         self.canvas.draw()
         self.fig.savefig(buf, format="png", bbox_inches='tight', dpi=140, facecolor='#ffffff')
         
-        # Ansicht in der GUI sofort wieder zurück auf Dark-Theme setzen
         self.fig.patch.set_facecolor(orig_fig_color)
         for ax in [self.ax_wave, self.ax, self.ax_waterfall]:
-            ax.set_facecolor('#2b2b2b' if ax != self.ax_waterfall else '#ffffff') # Waterfall behält mesh
+            ax.set_facecolor('#2b2b2b' if ax != self.ax_waterfall else '#ffffff')
             ax.title.set_color('black')
             ax.tick_params(colors='black')
         self.canvas.draw_idle()
@@ -249,7 +411,30 @@ class SyncViewerFrame(ctk.CTkFrame):
         img_base64 = base64.b64encode(buf.read()).decode('utf-8')
         graphs_uri = f"data:image/png;base64,{img_base64}"
 
-        # 5. CSS Struktur (optimiert für den lautlosen Browser-Druck)
+        # ------------------------------------------------------------------
+        # NEU: Boxplot & Zeitverlauf-Diagramme im Hintergrund generieren
+        # ------------------------------------------------------------------
+        boxplot_uri = self._generate_boxplot_base64_for_pdf()
+        boxplot_html = ""
+        if boxplot_uri:
+            boxplot_html = f"""
+            <div class="chart-box" style="margin-top: 20px;">
+                <div class="chart-title">Statistische Verteilung der Gesamtmessung (Boxplot)</div>
+                <img src="{boxplot_uri}" class="img-fluid" />
+            </div>
+            """
+
+        time_plots_uri = self._generate_time_plots_base64_for_pdf()
+        time_plots_html = ""
+        if time_plots_uri:
+            time_plots_html = f"""
+            <div class="chart-box" style="margin-top: 20px;">
+                <div class="chart-title">Zeitliche Signalverläufe der Messparameter (Gesamtmessung)</div>
+                <img src="{time_plots_uri}" class="img-fluid" />
+            </div>
+            """
+
+        # 5. CSS Struktur
         css = """
         @media print {
             body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -277,7 +462,7 @@ class SyncViewerFrame(ctk.CTkFrame):
         .img-fluid { max-width: 100%; height: auto; display: block; margin: 0 auto; }
         """
 
-        # 6. HTML Konstruktion
+        # 6. HTML Konstruktion (mit den neuen zeitlichen Verläufen)
         html_content = f"""
         <!DOCTYPE html>
         <html lang="de">
@@ -297,7 +482,7 @@ class SyncViewerFrame(ctk.CTkFrame):
                         <strong>Mess-Zeit:</strong> {uhrzeit_str}<br>
                         <strong>Dauer:</strong> {elapsed_str}<br>
                         Status: <span class="badge">Abgeschlossen</span>
-                </td>
+                    </td>
                 </tr>
             </table>
             
@@ -308,7 +493,8 @@ class SyncViewerFrame(ctk.CTkFrame):
 
             <h2>1. Allgemeine Systemmetadaten</h2>
             <table class="meta-table">
-                <tr><td class="meta-label">Quell-Ordner</td><td>{folder_display}</td></tr>                <tr><td class="meta-label">Anzahl Datenpunkte</td><td>{total_epochs} Zeitfenster (Epochen)</td></tr>
+                <tr><td class="meta-label">Quell-Ordner</td><td>{folder_display}</td></tr>
+                <tr><td class="meta-label">Anzahl Datenpunkte</td><td>{total_epochs} Zeitfenster (Epochen)</td></tr>
                 <tr><td class="meta-label">Abtastintervall (x_inc)</td><td>{x_inc_str}</td></tr>
                 <tr><td class="meta-label">Gesamte Messdauer</td><td>{total_time:.2f} Sekunden</td></tr>
             </table>
@@ -325,16 +511,23 @@ class SyncViewerFrame(ctk.CTkFrame):
                 </tbody>
             </table>
 
+            {boxplot_html}
+
+            <div class="page-break"></div>
+            <h2>3. Zeitliche Parameter-Verläufe (Gesamtmessung)</h2>
+            <p>Die nachfolgende Diagrammserie zeigt die Dynamik der einzelnen Kennwerte über die gesamte aufgezeichnete Messdauer:</p>
+            {time_plots_html}
+
             <div class="page-break"></div>
 
-            <h2>3. Signal- und Frequenzanalyse</h2>
+            <h2>4. Signal- und Frequenzanalyse (Aktueller Punkt)</h2>
             <p>Die nachfolgenden Diagramme dokumentieren den Zustand des aktuell in der Software angewählten Datenpunkts (Datenfenster-Index: {self.current_index} bei relativer Systemzeit: {self.time_data[self.current_index]:.2f}s).</p>
             <div class="chart-box">
                 <div class="chart-title">Wellenform, FFT Spektrum & Spektrogramm</div>
                 <img src="{graphs_uri}" class="img-fluid" />
             </div>
 
-            <h2>4. Protokollierte System-Events (Auszug)</h2>
+            <h2>5. Protokollierte System-Events (Auszug)</h2>
             <table class="event-table">
                 <thead>
                     <tr><th style="width: 15%;">Zeitstempel</th><th style="width: 20%;">Typ</th><th>Event-Text / Beschreibung</th></tr>
@@ -353,8 +546,6 @@ class SyncViewerFrame(ctk.CTkFrame):
                     <td style="width: 50%;"></td>
                 </tr>
             </table>
-            
-            
         </body>
         </html>
         """
@@ -368,12 +559,10 @@ class SyncViewerFrame(ctk.CTkFrame):
             with open(temp_html, "w", encoding="utf-8") as f:
                 f.write(html_content)
             
-            # Standard-Pfade zu Microsoft Edge unter Windows ermitteln
             edge_path = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
             if not os.path.exists(edge_path):
                 edge_path = r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"
 
-            # Übergabeargumente für den lautlosen PDF-Druck
             cmd = [
                 edge_path,
                 "--headless",
@@ -385,7 +574,6 @@ class SyncViewerFrame(ctk.CTkFrame):
             
             subprocess.run(cmd, check=True)
             
-            # Temporäre HTML wieder aufräumen
             if os.path.exists(temp_html):
                 os.remove(temp_html)
                 

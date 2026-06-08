@@ -100,14 +100,17 @@ class SyncLoggerFrame(ctk.CTkFrame):
         plot_container = ctk.CTkFrame(self)
         plot_container.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
         
-        self.fig = Figure(figsize=(8, 12), dpi=90)
+        # Figure etwas höher gemacht (14 statt 12), damit 6 Graphen gut Platz finden
+        self.fig = Figure(figsize=(8, 14), dpi=90)
         self.fig.patch.set_facecolor('#2b2b2b')
         
-        self.ax_wave = self.fig.add_subplot(5, 1, 1)
-        self.ax_fft = self.fig.add_subplot(5, 1, 2)
-        self.ax_stat = self.fig.add_subplot(5, 1, 3)
-        self.ax_peak = self.fig.add_subplot(5, 1, 4)
-        self.ax_pulse = self.fig.add_subplot(5, 1, 5)
+        # Gitter auf 6 Zeilen erweitern
+        self.ax_wave = self.fig.add_subplot(6, 1, 1)
+        self.ax_fft = self.fig.add_subplot(6, 1, 2)
+        self.ax_stat = self.fig.add_subplot(6, 1, 3)
+        self.ax_thd = self.fig.add_subplot(6, 1, 4)  # NEUER SUBPLOT FÜR THD
+        self.ax_peak = self.fig.add_subplot(6, 1, 5)
+        self.ax_pulse = self.fig.add_subplot(6, 1, 6)
 
         self.line_fft_curr, = self.ax_fft.plot([], [], color='#1f77b4', label='FFT Aktuell', linewidth=1)
         self.line_fft_avg, = self.ax_fft.plot([], [], color='#ff7f0e', label='FFT Average', linewidth=1.5)
@@ -119,14 +122,23 @@ class SyncLoggerFrame(ctk.CTkFrame):
             "RMS": self.ax_stat.plot([], [], color='cyan', label='RMS')[0],
             "MEAN": self.ax_stat.plot([], [], color='magenta', label='MEAN')[0],
             "STD": self.ax_stat.plot([], [], color='lime', label='STD')[0],
-            "THD (%)": self.ax_stat.plot([], [], color='yellow', label='THD (%)')[0],
+            "THD (%)": self.ax_thd.plot([], [], color='yellow', label='THD (%)')[0], # HIER: ax_thd zugewiesen
             "PEAK+": self.ax_peak.plot([], [], color='orange', label='PEAK+')[0],
             "PEAK-": self.ax_peak.plot([], [], color='red', label='PEAK-')[0],
             "POS_PULSE": self.ax_pulse.plot([], [], color='blue', label='POS_PULSE')[0],
             "NEG_PULSE": self.ax_pulse.plot([], [], color='purple', label='NEG_PULSE')[0]
         }
         
-        axes_titles = [(self.ax_wave, "Wellenform"), (self.ax_fft, "FFT Spektrum (dB)"), (self.ax_stat, "Statistik & THD"), (self.ax_peak, "Spitzenwerte"), (self.ax_pulse, "Impulse")]
+        # Titel und Achsen-Liste aktualisiert
+        axes_titles = [
+            (self.ax_wave, "Wellenform"), 
+            (self.ax_fft, "FFT Spektrum (dB)"), 
+            (self.ax_stat, "Statistik (RMS, MEAN, STD)"), 
+            (self.ax_thd, "THD Verlauf (%)"), # HIER: Titel für den neuen Graphen
+            (self.ax_peak, "Spitzenwerte"), 
+            (self.ax_pulse, "Impulse")
+        ]
+        
         for ax, title in axes_titles:
             ax.set_title(title, color='white', fontsize=10)
             ax.set_facecolor('#333333')
@@ -186,7 +198,8 @@ class SyncLoggerFrame(ctk.CTkFrame):
             line.set_data([], [])
 
         # 4. Achsen-Ansichten zurücksetzen, damit alte Skalierungen verschwinden
-        for ax in [self.ax_wave, self.ax_fft, self.ax_stat, self.ax_peak, self.ax_pulse]:
+        # HIER: self.ax_thd zur Liste hinzugefügt
+        for ax in [self.ax_wave, self.ax_fft, self.ax_stat, self.ax_thd, self.ax_peak, self.ax_pulse]:
             ax.relim()
             ax.autoscale_view()
 
@@ -418,7 +431,8 @@ class SyncLoggerFrame(ctk.CTkFrame):
             needs_redraw = True
 
         if needs_redraw:
-            for ax in [self.ax_stat, self.ax_peak, self.ax_pulse]:
+            # HIER: self.ax_thd zur Liste hinzugefügt
+            for ax in [self.ax_stat, self.ax_thd, self.ax_peak, self.ax_pulse]:
                 ax.relim()
                 ax.autoscale_view()
             self.canvas.draw_idle()
