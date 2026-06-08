@@ -7,13 +7,11 @@ import h5py
 import base64
 from io import BytesIO
 from datetime import datetime
+import subprocess  # Steuert Microsoft Edge für den PDF-Druck an
 
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
-
-# Wichtig für WeasyPrint
-from weasyprint import HTML
 
 class SyncViewerFrame(ctk.CTkFrame):
     def __init__(self, master):
@@ -163,12 +161,29 @@ class SyncViewerFrame(ctk.CTkFrame):
             return
 
         # 1. Metadaten & Zeitstempel holen
+        
         current_date = datetime.now().strftime("%d.%m.%Y %H:%M")
         total_epochs = len(self.time_data)
         total_time = self.time_data[-1] if total_epochs > 0 else 0
         x_inc_str = f"{self.x_inc} s"
+        folder_display = getattr(self, 'current_folder_path', "Nicht definiert")
         
-        # 2. Reale Statistiken zeilenweise für das HTML-Template berechnen
+        current_date = datetime.now().strftime("%d.%m.%Y")
+        current_time = datetime.now().strftime("%H:%M")
+        
+        # In load_log_folder():
+        self.mess_kommentar = self.h5_file.attrs.get('comment', 'Kein Kommentar hinterlegt.')
+        
+        # Verstrichene Zeit aus den geladenen Daten (letzter Zeitwert)
+        elapsed_seconds = self.time_data[-1] if len(self.time_data) > 0 else 0
+        minutes = int(elapsed_seconds // 60)
+        seconds = int(elapsed_seconds % 60)
+        elapsed_str = f"{minutes}m {seconds}s"
+        
+        datum_str = getattr(self, 'mess_datum', 'Nicht protokolliert')
+        uhrzeit_str = getattr(self, 'mess_uhrzeit', 'Nicht protokolliert')
+        
+        # 2. Reale Statistiken zeilenweise berechnen
         stats_html = ""
         for i, label in enumerate(self.labels):
             if i < self.stat_data.shape[1]:
@@ -226,7 +241,7 @@ class SyncViewerFrame(ctk.CTkFrame):
         self.fig.patch.set_facecolor(orig_fig_color)
         for ax in [self.ax_wave, self.ax, self.ax_waterfall]:
             ax.set_facecolor('#2b2b2b' if ax != self.ax_waterfall else '#ffffff') # Waterfall behält mesh
-            ax.title.set_color('black') # falls du Standard-Matplotlib nutzt
+            ax.title.set_color('black')
             ax.tick_params(colors='black')
         self.canvas.draw_idle()
         
@@ -234,15 +249,13 @@ class SyncViewerFrame(ctk.CTkFrame):
         img_base64 = base64.b64encode(buf.read()).decode('utf-8')
         graphs_uri = f"data:image/png;base64,{img_base64}"
 
-        # 5. CSS Struktur (Definiert exakt das gewünschte A4-Druckbild)
+        # 5. CSS Struktur (optimiert für den lautlosen Browser-Druck)
         css = """
-        @page {
-            size: A4;
-            margin: 20mm 15mm;
-            @bottom-right { content: "Seite " counter(page) " von " counter(pages); font-family: sans-serif; font-size: 8.5pt; color: #718096; }
-            @bottom-left { content: "Sync Offline Viewer — Analysebericht"; font-family: sans-serif; font-size: 8.5pt; color: #718096; }
+        @media print {
+            body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .page-break { page-break-after: always; break-after: page; }
         }
-        body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #2d3748; line-height: 1.6; font-size: 10pt; margin: 0; background-color: #ffffff; }
+        body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #2d3748; line-height: 1.6; font-size: 10pt; margin: 10mm; background-color: #ffffff; }
         *, *::before, *::after { box-sizing: border-box; }
         .header-table { width: 100%; border-collapse: collapse; margin-bottom: 25px; border-bottom: 3px solid #2b6cb0; }
         .header-table td { padding-bottom: 15px; vertical-align: bottom; }
@@ -251,7 +264,7 @@ class SyncViewerFrame(ctk.CTkFrame):
         .meta-table { width: 100%; margin-bottom: 30px; border-collapse: collapse; background-color: #f7fafc; border: 1px solid #e2e8f0; }
         .meta-table td { padding: 10px 14px; font-size: 9.5pt; border-bottom: 1px solid #e2e8f0; }
         .meta-label { font-weight: bold; color: #4a5568; width: 28%; background-color: #edf2f7; }
-        h2 { font-size: 14pt; color: #1a365d; border-left: 4px solid #2b6cb0; padding-left: 10px; margin-top: 30px; margin-bottom: 15px; page-break-after: avoid; }
+        h2 { font-size: 14pt; color: #1a365d; border-left: 4px solid #2b6cb0; padding-left: 10px; margin-top: 30px; margin-bottom: 15px; break-after: avoid; }
         p { color: #4a5568; text-align: justify; }
         .stats-table, .event-table { width: 100%; border-collapse: collapse; margin-bottom: 25px; }
         .stats-table th, .event-table th { background-color: #2b6cb0; color: white; text-align: left; padding: 10px; font-size: 9.5pt; font-weight: 600; }
@@ -259,12 +272,12 @@ class SyncViewerFrame(ctk.CTkFrame):
         .stats-table td, .event-table td { padding: 9px; border: 1px solid #e2e8f0; font-size: 9.5pt; }
         .stats-table tr:nth-child(even), .event-table tr:nth-child(even) { background-color: #f7fafc; }
         .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 8pt; font-weight: bold; text-transform: uppercase; background-color: #ebf8ff; color: #2b6cb0; }
-        .chart-box { border: 1px solid #e2e8f0; padding: 15px; margin-bottom: 25px; text-align: center; page-break-inside: avoid; }
+        .chart-box { border: 1px solid #e2e8f0; padding: 15px; margin-bottom: 25px; text-align: center; break-inside: avoid; }
         .chart-title { font-size: 10pt; font-weight: bold; color: #2d3748; margin-bottom: 12px; text-align: left; }
         .img-fluid { max-width: 100%; height: auto; display: block; margin: 0 auto; }
         """
 
-        # 6. HTML Konstruktion mit eingebetteten Datenfeldern
+        # 6. HTML Konstruktion
         html_content = f"""
         <!DOCTYPE html>
         <html lang="de">
@@ -276,20 +289,26 @@ class SyncViewerFrame(ctk.CTkFrame):
             <table class="header-table">
                 <tr>
                     <td>
-                        <div class="report-title">Sync Offline Viewer</div>
+                        <div class="report-title">Shaft Voltage Monitor</div>
                         <div class="report-subtitle">Automatisierter Mess- und Analysebericht</div>
                     </td>
-                    <td style="text-align: right; color: #718096; font-size: 9.5pt;">
-                        Generiert am: {current_date}<br>
+                    <td style="text-align: right; color: #4a5568; font-size: 9pt;">
+                        <strong>Mess-Datum:</strong> {datum_str}<br>
+                        <strong>Mess-Zeit:</strong> {uhrzeit_str}<br>
+                        <strong>Dauer:</strong> {elapsed_str}<br>
                         Status: <span class="badge">Abgeschlossen</span>
-                    </td>
+                </td>
                 </tr>
             </table>
+            
+            <h2>Prüfer-Bemerkungen</h2>
+            <p style="background-color: #f7fafc; padding: 15px; border: 1px solid #e2e8f0;">
+                {getattr(self, 'mess_kommentar', 'Kein Kommentar')}
+            </p>
 
             <h2>1. Allgemeine Systemmetadaten</h2>
             <table class="meta-table">
-                <tr><td class="meta-label">Analysierte Datei</td><td>datalog.h5</td></tr>
-                <tr><td class="meta-label">Anzahl Datenpunkte</td><td>{total_epochs} Zeitfenster (Epochen)</td></tr>
+                <tr><td class="meta-label">Quell-Ordner</td><td>{folder_display}</td></tr>                <tr><td class="meta-label">Anzahl Datenpunkte</td><td>{total_epochs} Zeitfenster (Epochen)</td></tr>
                 <tr><td class="meta-label">Abtastintervall (x_inc)</td><td>{x_inc_str}</td></tr>
                 <tr><td class="meta-label">Gesamte Messdauer</td><td>{total_time:.2f} Sekunden</td></tr>
             </table>
@@ -306,7 +325,7 @@ class SyncViewerFrame(ctk.CTkFrame):
                 </tbody>
             </table>
 
-            <div style="page-break-after: always;"></div>
+            <div class="page-break"></div>
 
             <h2>3. Signal- und Frequenzanalyse</h2>
             <p>Die nachfolgenden Diagramme dokumentieren den Zustand des aktuell in der Software angewählten Datenpunkts (Datenfenster-Index: {self.current_index} bei relativer Systemzeit: {self.time_data[self.current_index]:.2f}s).</p>
@@ -325,7 +344,7 @@ class SyncViewerFrame(ctk.CTkFrame):
                 </tbody>
             </table>
             
-            <table style="width: 100%; margin-top: 40px; page-break-inside: avoid;">
+            <table style="width: 100%; margin-top: 40px; break-inside: avoid;">
                 <tr>
                     <td style="width: 50%; border-top: 1px solid #a0aec0; padding-top: 8px;">
                         <font style="font-size: 9pt; color: #718096;">Automatisches Prüfsystem</font><br>
@@ -334,16 +353,42 @@ class SyncViewerFrame(ctk.CTkFrame):
                     <td style="width: 50%;"></td>
                 </tr>
             </table>
+            
+            
         </body>
         </html>
         """
 
-        # 7. Rendering zu PDF
+        # 7. PDF-Generierung via Microsoft Edge (Headless-Modus)
+        temp_html = os.path.join(os.getcwd(), "temp_report.html")
         output_filename = f"Messbericht_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
         output_path = os.path.join(os.getcwd(), output_filename)
         
         try:
-            HTML(string=html_content).write_pdf(output_path)
+            with open(temp_html, "w", encoding="utf-8") as f:
+                f.write(html_content)
+            
+            # Standard-Pfade zu Microsoft Edge unter Windows ermitteln
+            edge_path = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+            if not os.path.exists(edge_path):
+                edge_path = r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"
+
+            # Übergabeargumente für den lautlosen PDF-Druck
+            cmd = [
+                edge_path,
+                "--headless",
+                "--disable-gpu",
+                f"--print-to-pdf={output_path}",
+                "--no-margins",
+                temp_html
+            ]
+            
+            subprocess.run(cmd, check=True)
+            
+            # Temporäre HTML wieder aufräumen
+            if os.path.exists(temp_html):
+                os.remove(temp_html)
+                
             messagebox.showinfo("Erfolg", f"Report erfolgreich generiert:\n{output_path}")
             
             if os.name == 'nt':
@@ -389,6 +434,7 @@ class SyncViewerFrame(ctk.CTkFrame):
         initial_dir = os.path.join(os.getcwd(), "data") if os.path.exists("data") else "/"
         folder_path = filedialog.askdirectory(initialdir=initial_dir)
         if not folder_path: return
+        self.current_folder_path = folder_path
         
         h5_path = os.path.join(folder_path, "datalog.h5")
         if not os.path.exists(h5_path):
@@ -397,6 +443,12 @@ class SyncViewerFrame(ctk.CTkFrame):
             
         try:
             self.h5_file = h5py.File(h5_path, "r")
+            
+            # --- HIER MUSS ES HIN! ---
+            self.mess_datum = self.h5_file.attrs.get('date', 'Unbekannt')
+            self.mess_uhrzeit = self.h5_file.attrs.get('time', 'Unbekannt')
+            # -------------------------
+            
             self.time_data = self.h5_file["time"][:]
             self.stat_data = self.h5_file["stats"][:]
             
