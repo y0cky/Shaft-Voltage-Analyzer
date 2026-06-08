@@ -228,21 +228,32 @@ class SyncReportFrame(ctk.CTkFrame):
         return metrics
 
     def _generate_wave_plots(self, m_wo, m_w):
-        fig = plt.figure(figsize=(10, 15), constrained_layout=True)
+        # Wir erhöhen die Zeilenanzahl von 3 auf 4, um Platz für die Trennung zu schaffen
+        fig = plt.figure(figsize=(10, 12), constrained_layout=True)
         fig.patch.set_facecolor("#ffffff")
         
         min_len = min(len(m_wo["time_scale"]), len(m_w["time_scale"]))
         t_scale = m_wo["time_scale"][:min_len]
         
-        ax1 = fig.add_subplot(311)
-        ax1.fill_between(t_scale, m_wo["envelope_min"][:min_len], m_wo["envelope_max"][:min_len], color="#e53e3e", alpha=0.3, label="Ref. Rauschband (Min/Max)")
-        ax1.fill_between(t_scale, m_w["envelope_min"][:min_len], m_w["envelope_max"][:min_len], color="#2b6cb0", alpha=0.5, label="Opt. Rauschband (Min/Max)")
-        ax1.plot(t_scale, m_wo["wave_example"][:min_len], color="#c53030", alpha=0.9, linewidth=1, label="Ref. Peak-Beispiel")
-        ax1.plot(t_scale, m_w["wave_example"][:min_len], color="#2c5282", alpha=1.0, linewidth=1, label="Opt. Peak-Beispiel")
+        # 1. Subplot: Nur das Rauschband (Hüllkurven)
+        ax1 = fig.add_subplot(411)
+        ax1.fill_between(t_scale, m_wo["envelope_min"][:min_len], m_wo["envelope_max"][:min_len], 
+                         color="#e53e3e", alpha=0.3, label="Ref. Rauschband")
+        ax1.fill_between(t_scale, m_w["envelope_min"][:min_len], m_w["envelope_max"][:min_len], 
+                         color="#2b6cb0", alpha=0.3, label="Opt. Rauschband")
         ax1.set_ylabel("Spannung (V)", fontweight="bold")
-        ax1.set_title("1. Wellenform-Hüllkurven & Absolutes Maximum", fontsize=12, fontweight="bold", color="#1a365d")
+        ax1.set_title("1. Rauschband (Hüllkurven)", fontsize=12, fontweight="bold", color="#1a365d")
         ax1.legend(loc="upper right")
+        
+        # 2. Subplot: Nur die Peak-Beispiele
+        ax2 = fig.add_subplot(412)
+        ax2.plot(t_scale, m_wo["wave_example"][:min_len], color="#c53030", alpha=0.9, linewidth=1, label="Ref. Peak-Beispiel")
+        ax2.plot(t_scale, m_w["wave_example"][:min_len], color="#2c5282", alpha=0.9, linewidth=1, label="Opt. Peak-Beispiel")
+        ax2.set_ylabel("Spannung (V)", fontweight="bold")
+        ax2.set_title("2. Vergleich der Peak-Beispiele", fontsize=12, fontweight="bold", color="#1a365d")
+        ax2.legend(loc="upper right")
 
+        # Vorbereitung für Oszillogramme
         min_rows = min(m_wo["wave_matrix"].shape[0], m_w["wave_matrix"].shape[0])
         dec_x = max(1, len(t_scale) // 1500) 
         t_dec = t_scale[::dec_x]
@@ -251,35 +262,28 @@ class SyncReportFrame(ctk.CTkFrame):
         mat_wo = m_wo["wave_matrix"][:min_rows, :min_len:dec_x]
         mat_w = m_w["wave_matrix"][:min_rows, :min_len:dec_x]
         
-        # --- START DER OPTIMIERUNG FÜR DAS OSZILLOGRAMM ---
-        # 99.5-Perzentil statt absolutes Maximum ignoriert einzelne Ausreißer
         v_limit_wo = np.percentile(np.abs(mat_wo), 99.5)
         v_limit_w  = np.percentile(np.abs(mat_w), 99.5)
-        
         v_abs_max = max(v_limit_wo, v_limit_w)
-        
-        # Verhindert, dass reines Rauschen bei perfekten Messungen extrem verstärkt wird
-        if v_abs_max < 0.01: 
-            v_abs_max = 0.01
-        # --- ENDE DER OPTIMIERUNG ---
+        if v_abs_max < 0.01: v_abs_max = 0.01
 
-        ax3 = fig.add_subplot(312)
-        # rasterized=True hinzugefügt
+        # 3. Subplot: Oszillogramm Ohne
+        ax3 = fig.add_subplot(413)
         ax3.pcolormesh(X, Y, mat_wo, shading="nearest", cmap="coolwarm", vmin=-v_abs_max, vmax=v_abs_max, rasterized=True)
-        ax3.set_ylabel("Mess-Zeitpunkt (s)", fontweight="bold")
-        ax3.set_title("2. Oszillogramm-Historie - OHNE Ableitsystem", fontsize=12, fontweight="bold", color="#1a365d")
+        ax3.set_ylabel("Zeit (s)", fontweight="bold")
+        ax3.set_title("3. Oszillogramm-Historie - OHNE Ableitsystem", fontsize=12, fontweight="bold", color="#1a365d")
 
-        ax4 = fig.add_subplot(313)
-        # rasterized=True hinzugefügt
+        # 4. Subplot: Oszillogramm Mit
+        ax4 = fig.add_subplot(414)
         ax4.pcolormesh(X, Y, mat_w, shading="nearest", cmap="coolwarm", vmin=-v_abs_max, vmax=v_abs_max, rasterized=True)
         ax4.set_xlabel("Zeit (ms)", fontweight="bold")
-        ax4.set_ylabel("Mess-Zeitpunkt (s)", fontweight="bold")
-        ax4.set_title("3. Oszillogramm-Historie - MIT Ableitsystem", fontsize=12, fontweight="bold", color="#1a365d")
+        ax4.set_ylabel("Zeit (s)", fontweight="bold")
+        ax4.set_title("4. Oszillogramm-Historie - MIT Ableitsystem", fontsize=12, fontweight="bold", color="#1a365d")
 
-        for ax in [ax1, ax3, ax4]:
+        for ax in [ax1, ax2, ax3, ax4]:
             ax.set_xlim(t_scale[0], t_scale[-1])
             ax.tick_params(colors="#2d3748", labelsize=9)
-            if ax == ax1:
+            if ax in [ax1, ax2]:
                 ax.grid(True, linestyle=":", alpha=0.6, color="#a0aec0")
                 
         buf = BytesIO()
