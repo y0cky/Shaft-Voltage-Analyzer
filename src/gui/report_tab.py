@@ -301,16 +301,42 @@ class SyncReportFrame(ctk.CTkFrame):
 
             txt_vpp, class_vpp, col_vpp = self._compute_change_dynamics(w_wo["vpp"], w_w["vpp"])
             txt_rms, class_rms, col_rms = self._compute_change_dynamics(w_wo["rms"], w_w["rms"])
+
+            # Berechnung der Peak-Dynamik hinzufügen
+            txt_peak_pos, class_peak_pos, col_peak_pos = self._compute_change_dynamics(w_wo["peak_pos"], w_w["peak_pos"])
             
             txt_thd, class_thd, col_thd = self._compute_change_dynamics(f_wo["thd"].mean(), f_w["thd"].mean())
             damping_profile = f_wo["fft_avg"] - f_w["fft_avg"]
             avg_broadband_damping = np.mean(damping_profile)
+
+            # Definition der Zielwerte
+            ideal_db = 5.0  # Ein Wert von 5 dB erreicht ca. 50% Balkenfüllung
+            # Berechnung der prozentualen Füllung
+            # Wir nutzen eine leicht gedämpfte lineare Skalierung, damit 
+            # sehr hohe Werte nicht sofort über 100% schießen.
+            abs_damping = abs(avg_broadband_damping)
+            efficacy_pct = min(100, (abs_damping / ideal_db) * 50)
 
             wave_chart_b64 = self._generate_wave_plots(w_wo, w_w)
             fft_chart1_b64, fft_chart2_b64 = self._generate_fft_plots(f_wo, f_w)
 
             user_comment = self.txt_comment.get() if self.txt_comment.get() else "Kombinierte Zeitbereichs- & Spektralanalyse"
             current_time_str = datetime.now().strftime("%d.%m.%Y %H:%M")
+
+            # Berechnung der Peak-Werte
+            peak_wo = np.max(f_wo["fft_avg"])
+            peak_w = np.max(f_w["fft_avg"])
+            diff_peak = peak_w - peak_wo  # Negative Differenz ist gut (Dämpfung)
+
+            # HIER WIRD DIE FARBE DEFINIERT
+            if diff_peak < -0.5:
+                col_peak = "#2f855a"  # Grün (Verbesserung)
+            elif diff_peak > 0.5:
+                col_peak = "#e53e3e"  # Rot (Verschlechterung)
+            else:
+                col_peak = "#4a5568"  # Grau (Neutral)
+
+            
 
             css = """
             @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
@@ -334,6 +360,8 @@ class SyncReportFrame(ctk.CTkFrame):
             .chart-box { border: 1px solid #e2e8f0; padding: 10px; margin-top: 10px; text-align: center; page-break-inside: avoid; break-inside: avoid; }
             .img-fluid { max-width: 100%; height: auto; display: block; margin: 0 auto; }
             .page-break { page-break-before: always; }
+            .progress-bar-container { background-color: #e2e8f0; border-radius: 10px; height: 15px; width: 100%; margin: 10px 0; overflow: hidden; }
+            .progress-bar-fill { height: 100%; background-color: #38a169; width: 0%; transition: width 1s; }
             """
 
             html_content = f"""
@@ -344,7 +372,7 @@ class SyncReportFrame(ctk.CTkFrame):
                 <table class="header-table">
                     <tr>
                         <td>
-                            <div class="report-title">Umfassender Analyse-Bericht</div>
+                            <div class="report-title">Wirksamkeit des Ableitsystems</div>
                             <div class="report-subtitle">Wellenform (Zeit) & FFT (Frequenz)</div>
                         </td>
                         <td style="text-align: right; color: #4a5568; font-size: 9pt;">
@@ -358,12 +386,27 @@ class SyncReportFrame(ctk.CTkFrame):
 
                 <table class="kpi-grid">
                     <tr>
-                        <td><div class="kpi-card"><div class="kpi-label">Vpp (Spannungshub)</div><div class="kpi-value {class_vpp}">{txt_vpp}</div></div></td>
+                        <td><div class="kpi-card"><div class="kpi-label">Vpp (Spitze-Spitze)</div><div class="kpi-value {class_vpp}">{txt_vpp}</div></div></td>
                         <td><div class="kpi-card"><div class="kpi-label">RMS (Effektivwert)</div><div class="kpi-value {class_rms}">{txt_rms}</div></div></td>
                         <td><div class="kpi-card"><div class="kpi-label">Breitband-Dämpfung</div><div class="kpi-value" style="color:#2f855a;">{avg_broadband_damping:+.1f} dB</div></div></td>
                         <td><div class="kpi-card"><div class="kpi-label">THD (Oberwellen)</div><div class="kpi-value {class_thd}">{txt_thd}</div></div></td>
                     </tr>
                 </table>
+
+                <div style="margin: 20px 0;">
+                    <div style="display: flex; justify-content: space-between; font-weight:bold; font-size: 9pt;">
+                        <span>System-Effizienz (Dämpfung)</span>
+                        <span>{efficacy_pct:.0f}%</span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar-fill" style="width: {efficacy_pct}%; background-color: #38a169;"></div>
+                        <div style="text-align: right; font-size: 8pt; color: #718096;">{abs_damping:.1f} dB Dämpfung erreicht</div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 8pt; color: #718096;">
+                        <span>Keine Wirkung</span>
+                        <span>Exzellente Ableitung (10db)</span>
+                    </div>
+                </div>
                 
                 <h2>1. Zeitbereichsanalyse (Wellenform)</h2>
                 <table class="compare-table">
@@ -371,7 +414,7 @@ class SyncReportFrame(ctk.CTkFrame):
                     <tbody>
                         <tr><td><strong>Spitze-Spitze Spannung (Vpp)</strong></td><td>{w_wo["vpp"]:.2f} V</td><td>{w_w["vpp"]:.2f} V <span style="font-weight:bold; color:{col_vpp};">({txt_vpp})</span></td></tr>
                         <tr><td><strong>Effektivspannung (RMS)</strong></td><td>{w_wo["rms"]:.2f} V</td><td>{w_w["rms"]:.2f} V <span style="font-weight:bold; color:{col_rms};">({txt_rms})</span></td></tr>
-                        <tr><td><strong>Max. Positiver Peak</strong></td><td>{w_wo["peak_pos"]:.2f} V</td><td>{w_w["peak_pos"]:.2f} V</td></tr>
+                        <tr><td><strong>Max. Positiver Peak</strong></td><td>{w_wo["peak_pos"]:.2f} V</td><td>{w_w["peak_pos"]:.2f} V <span style="font-weight:bold; color:{col_peak_pos};">({txt_peak_pos})</span></td></tr>
                     </tbody>
                 </table>
                 <div class="chart-box"><img src="{wave_chart_b64}" class="img-fluid" /></div>
@@ -382,7 +425,7 @@ class SyncReportFrame(ctk.CTkFrame):
                     <thead><tr><th>Parameter</th><th>Ohne Ableitsystem (Ref.)</th><th>Mit Ableitsystem (Opt.)</th></tr></thead>
                     <tbody>
                         <tr><td><strong>Mittlerer Klirrfaktor (THD &mu;)</strong></td><td>{f_wo["thd"].mean():.2f} %</td><td>{f_w["thd"].mean():.2f} % <span style="font-weight:bold; color:{col_thd};">({txt_thd})</span></td></tr>
-                        <tr><td><strong>Absoluter Spektral-Peak</strong></td><td>{np.max(f_wo["fft_avg"]):.1f} dB</td><td>{np.max(f_w["fft_avg"]):.1f} dB</td></tr>
+                        <tr><td><strong>Absoluter Spektral-Peak</strong></td><td>{np.max(f_wo["fft_avg"]):.1f} dB</td><td>{np.max(f_w["fft_avg"]):.1f} dB <span style="font-weight:bold; color:{col_peak};">({diff_peak:+.1f} dB)</span></td></tr>
                     </tbody>
                 </table>
                 <div class="chart-box"><img src="{fft_chart1_b64}" class="img-fluid" /></div>
