@@ -10,6 +10,9 @@ from datetime import datetime
 import subprocess
 import matplotlib.pyplot as plt
 
+import tkinter.ttk as ttk
+from src.utils.db_utils import MetadataDB
+
 class SyncReportFrame(ctk.CTkFrame):
     def __init__(self, master):
         super().__init__(master)
@@ -29,19 +32,29 @@ class SyncReportFrame(ctk.CTkFrame):
         file_frame = ctk.CTkFrame(self, corner_radius=10)
         file_frame.pack(fill="x", padx=40, pady=10)
 
-        # 1. Ohne Ableitsystem
-        ctk.CTkLabel(file_frame, text="1. Referenz-Messung (OHNE Ableitsystem):", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, sticky="w", padx=20, pady=(15, 5))
-        self.btn_without = ctk.CTkButton(file_frame, text="Datei laden (.h5)", command=self.load_without, fg_color="#cb4b16", hover_color="#a03b10")
-        self.btn_without.grid(row=1, column=0, padx=20, pady=(0, 15), sticky="w")
+        # 1. Ohne Ableitsystem (Referenz)
+        ctk.CTkLabel(file_frame, text="1. Referenz-Messung (OHNE Ableitsystem):", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, columnspan=3, sticky="w", padx=20, pady=(15, 5))
+        
+        self.btn_db_without = ctk.CTkButton(file_frame, text="🔍 Aus Datenbank", command=lambda: self.open_db_browser("without"), fg_color="#cb4b16", hover_color="#a03b10", width=140)
+        self.btn_db_without.grid(row=1, column=0, padx=(20, 5), pady=(0, 15), sticky="w")
+        
+        self.btn_man_without = ctk.CTkButton(file_frame, text="Manuell (.h5)", command=self.load_without, fg_color="#4a5568", hover_color="#2d3748", width=100)
+        self.btn_man_without.grid(row=1, column=1, padx=5, pady=(0, 15), sticky="w")
+        
         self.lbl_without = ctk.CTkLabel(file_frame, text="Keine Datei ausgewählt", text_color="gray", justify="left")
-        self.lbl_without.grid(row=1, column=1, padx=10, pady=(0, 15), sticky="w")
+        self.lbl_without.grid(row=1, column=2, padx=10, pady=(0, 15), sticky="w")
 
-        # 2. Mit Ableitsystem
-        ctk.CTkLabel(file_frame, text="2. Optimierte Messung (MIT Ableitsystem):", font=ctk.CTkFont(weight="bold")).grid(row=2, column=0, sticky="w", padx=20, pady=(15, 5))
-        self.btn_with = ctk.CTkButton(file_frame, text="Datei laden (.h5)", command=self.load_with, fg_color="#2aa198", hover_color="#207a73")
-        self.btn_with.grid(row=3, column=0, padx=20, pady=(0, 15), sticky="w")
+        # 2. Mit Ableitsystem (Optimiert)
+        ctk.CTkLabel(file_frame, text="2. Optimierte Messung (MIT Ableitsystem):", font=ctk.CTkFont(weight="bold")).grid(row=2, column=0, columnspan=3, sticky="w", padx=20, pady=(15, 5))
+        
+        self.btn_db_with = ctk.CTkButton(file_frame, text="🔍 Aus Datenbank", command=lambda: self.open_db_browser("with"), fg_color="#2aa198", hover_color="#207a73", width=140)
+        self.btn_db_with.grid(row=3, column=0, padx=(20, 5), pady=(0, 15), sticky="w")
+        
+        self.btn_man_with = ctk.CTkButton(file_frame, text="Manuell (.h5)", command=self.load_with, fg_color="#4a5568", hover_color="#2d3748", width=100)
+        self.btn_man_with.grid(row=3, column=1, padx=5, pady=(0, 15), sticky="w")
+        
         self.lbl_with = ctk.CTkLabel(file_frame, text="Keine Datei ausgewählt", text_color="gray", justify="left")
-        self.lbl_with.grid(row=3, column=1, padx=10, pady=(0, 15), sticky="w")
+        self.lbl_with.grid(row=3, column=2, padx=10, pady=(0, 15), sticky="w")
 
         options_frame = ctk.CTkFrame(self, corner_radius=10)
         options_frame.pack(fill="x", padx=40, pady=15)
@@ -53,6 +66,80 @@ class SyncReportFrame(ctk.CTkFrame):
         self.btn_report_full = ctk.CTkButton(self, text="📑 Vollständigen Vergleichsbericht generieren (Wave + FFT)", font=ctk.CTkFont(size=15, weight="bold"),
                                              height=45, width=400, fg_color="#6b46c1", hover_color="#553c9a", command=self.generate_full_report)
         self.btn_report_full.pack(pady=15)
+
+    def open_db_browser(self, target):
+        db_window = ctk.CTkToplevel(self)
+        title_str = "Referenz-Messung wählen" if target == "without" else "Optimierte Messung wählen"
+        db_window.title(title_str)
+        db_window.geometry("950x400")
+        db_window.transient(self) 
+
+        search_frame = ctk.CTkFrame(db_window)
+        search_frame.pack(fill="x", padx=10, pady=10)
+        
+        ctk.CTkLabel(search_frame, text="Suchen (Datum / Kommentar):", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=10)
+        search_entry = ctk.CTkEntry(search_frame, width=350, placeholder_text="Tippen zum Filtern...")
+        search_entry.pack(side="left", padx=5)
+
+        columns = ("id", "Datum", "Dauer (s)", "THD (%)", "RMS (V)", "Vpp Max (V)", "Kommentar")
+        tree = ttk.Treeview(db_window, columns=columns, show="headings")
+        
+        tree.column("id", width=40, anchor="center")
+        tree.column("Datum", width=140)
+        tree.column("Dauer (s)", width=80, anchor="e")
+        tree.column("THD (%)", width=80, anchor="e")
+        tree.column("RMS (V)", width=80, anchor="e")
+        tree.column("Vpp Max (V)", width=80, anchor="e")
+        tree.column("Kommentar", width=400)
+        
+        for col in columns:
+            tree.heading(col, text=col)
+            
+        tree.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        db = MetadataDB()
+
+        def refresh_table(event=None):
+            for row in tree.get_children():
+                tree.delete(row)
+            
+            term = search_entry.get().strip()
+            records = db.search_measurements(term)
+            
+            for r in records:
+                tree.insert("", "end", iid=r["folder_path"], values=(
+                    r["id"],
+                    r["timestamp"],
+                    f"{r['duration_sec']:.1f}",
+                    f"{r['thd_mean']:.2f}",
+                    f"{r['rms_mean']:.3f}",
+                    f"{r['vpp_max']:.3f}",
+                    r["comment"]
+                ))
+
+        refresh_table()
+        search_entry.bind("<KeyRelease>", refresh_table)
+
+        def on_double_click(event):
+            item_id = tree.focus()
+            if item_id:
+                folder_path = item_id 
+                h5_path = os.path.join(folder_path, "datalog.h5")
+                
+                if os.path.exists(h5_path):
+                    # Zuweisung basierend darauf, welcher Button geklickt wurde
+                    if target == "without":
+                        self.path_without = h5_path
+                        self.lbl_without.configure(text=f"DB: {os.path.basename(folder_path)}", text_color="white")
+                    elif target == "with":
+                        self.path_with = h5_path
+                        self.lbl_with.configure(text=f"DB: {os.path.basename(folder_path)}", text_color="white")
+                    
+                    db_window.destroy()
+                else:
+                    messagebox.showerror("Fehler", f"Die HDF5-Datei existiert in diesem Ordner nicht mehr!\nPfad: {h5_path}")
+
+        tree.bind("<Double-1>", on_double_click)
 
     def load_without(self):
         path = filedialog.askopenfilename(filetypes=[("HDF5-Dateien", "*.h5")])

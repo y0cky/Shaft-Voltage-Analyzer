@@ -1,6 +1,7 @@
 import os
 import tkinter as tk
 from tkinter import filedialog, messagebox
+import tkinter.ttk as ttk  # <-- NEU für die Tabelle
 import customtkinter as ctk
 import numpy as np
 import h5py
@@ -12,6 +13,9 @@ import subprocess  # Steuert Microsoft Edge für den PDF-Druck an
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
+
+# <-- NEU: Import für die SQLite-Datenbank
+from src.utils.db_utils import MetadataDB
 
 class SyncViewerFrame(ctk.CTkFrame):
     def __init__(self, master):
@@ -43,7 +47,6 @@ class SyncViewerFrame(ctk.CTkFrame):
             messagebox.showwarning("Hinweis", "Keine statistischen Daten geladen.")
             return
 
-        # 1. Datentypen basierend auf den Labels kategorisieren
         groups = {
             "Spannung / Amplitude": [],
             "Prozent (z.B. THD)": [],
@@ -99,7 +102,6 @@ class SyncViewerFrame(ctk.CTkFrame):
             ax.set_ylabel(group_name, color='white', fontsize=10)
             ax.tick_params(colors='white', labelsize=9)
             ax.grid(True, linestyle=":", alpha=0.3, color='gray')
-            
             ax.set_xticklabels(labels_to_plot, rotation=15, ha='right')
 
         fig.suptitle("Statistische Verteilung nach Datentyp", color='white', fontsize=14, weight='bold')
@@ -112,11 +114,9 @@ class SyncViewerFrame(ctk.CTkFrame):
         if self.stat_data is None or len(self.stat_data) == 0 or self.time_data is None or len(self.time_data) == 0:
             return ""
 
-        # Erstelle ein hohes Figure-Objekt für 4 Subplots untereinander mit geteilter X-Achse
         fig, axes = plt.subplots(4, 1, figsize=(10, 12), sharex=True)
         fig.patch.set_facecolor('#ffffff')
 
-        # Indizes dynamisch anhand der Labels zuordnen
         lbl_indices = {lbl.upper(): idx for idx, lbl in enumerate(self.labels)}
         
         def get_data(name, fallback_idx):
@@ -129,7 +129,6 @@ class SyncViewerFrame(ctk.CTkFrame):
 
         t = self.time_data
 
-        # Subplot 1: RMS, Mean, Std (zusammen in einem Diagramm)
         ax1 = axes[0]
         ax1.set_facecolor('#ffffff')
         rms_d, rms_l = get_data("RMS", 0)
@@ -143,7 +142,6 @@ class SyncViewerFrame(ctk.CTkFrame):
         ax1.title.set_text("Statistische Kennwerte (RMS, Mean, Std)")
         ax1.legend(loc="upper right")
 
-        # Subplot 2: Spitzenwerte (Peak+, Peak- in eigenem Diagramm)
         ax2 = axes[1]
         ax2.set_facecolor('#ffffff')
         p_pos_d, p_pos_l = get_data("PEAK+", 3)
@@ -154,7 +152,6 @@ class SyncViewerFrame(ctk.CTkFrame):
         ax2.title.set_text("Spitzenwerte (Peak+, Peak-)")
         ax2.legend(loc="upper right")
 
-        # Subplot 3: Impulse (Pos_pulse, Neg_pulse in eigenem Diagramm)
         ax3 = axes[2]
         ax3.set_facecolor('#ffffff')
         pulse_pos_d, pulse_pos_l = get_data("POS_PULSE", 5)
@@ -165,7 +162,6 @@ class SyncViewerFrame(ctk.CTkFrame):
         ax3.title.set_text("Impulszähler (Pos. / Neg. Pulse)")
         ax3.legend(loc="upper right")
 
-        # Subplot 4: THD (in eigenem Diagramm)
         ax4 = axes[3]
         ax4.set_facecolor('#ffffff')
         thd_d, thd_l = get_data("THD", 7)
@@ -175,7 +171,6 @@ class SyncViewerFrame(ctk.CTkFrame):
         ax4.title.set_text("Total Harmonic Distortion (THD)")
         ax4.legend(loc="upper right")
 
-        # Formatierung für alle Achsen einheitlich anwenden
         for ax in axes:
             ax.tick_params(colors='#2d3748', labelsize=9)
             ax.grid(True, linestyle=":", alpha=0.6, color='#a0aec0')
@@ -185,21 +180,18 @@ class SyncViewerFrame(ctk.CTkFrame):
 
         plt.tight_layout()
         
-        # In Speicher-Buffer schreiben und als Base64 kodieren
         buf = BytesIO()
         fig.savefig(buf, format="png", bbox_inches='tight', dpi=140, facecolor='#ffffff')
-        plt.close(fig) # Wichtig, um UI-Ressourcen freizugeben
+        plt.close(fig) 
         
         buf.seek(0)
         img_base64 = base64.b64encode(buf.read()).decode('utf-8')
         return f"data:image/png;base64,{img_base64}"
         
     def _generate_boxplot_base64_for_pdf(self):
-        """Generiert den Boxplot im hellen Theme im Hintergrund und gibt ihn als Base64-String zurück."""
         if self.stat_data is None or len(self.stat_data) == 0:
             return ""
 
-        # Datentypen kategorisieren
         groups = {
             "Spannung / Amplitude": [],
             "Prozent (z.B. THD)": [],
@@ -230,7 +222,6 @@ class SyncViewerFrame(ctk.CTkFrame):
         if num_subplots == 0:
             return ""
 
-        # Plot mit weißem Hintergrund für PDF erstellen
         fig, axes = plt.subplots(num_subplots, 1, figsize=(10, 4 * num_subplots), sharex=False)
         fig.patch.set_facecolor('#ffffff') 
         
@@ -245,7 +236,6 @@ class SyncViewerFrame(ctk.CTkFrame):
             
             bp = ax.boxplot(data_to_plot, labels=labels_to_plot, patch_artist=True)
             
-            # Print-freundliche (helle) Farben
             for box in bp['boxes']:
                 box.set(facecolor='#2b6cb0', color='#1a365d', alpha=0.7)
             for median in bp['medians']:
@@ -265,10 +255,9 @@ class SyncViewerFrame(ctk.CTkFrame):
         fig.suptitle("Statistische Verteilung nach Datentyp", color='#1a365d', fontsize=14, weight='bold')
         plt.tight_layout()
         
-        # In Buffer speichern und Base64 generieren
         buf = BytesIO()
         fig.savefig(buf, format="png", bbox_inches='tight', dpi=140, facecolor='#ffffff')
-        plt.close(fig) # Wichtig: Verhindert Memory Leak und dass sich ein neues Fenster öffnet!
+        plt.close(fig)
         
         buf.seek(0)
         img_base64 = base64.b64encode(buf.read()).decode('utf-8')
@@ -279,7 +268,12 @@ class SyncViewerFrame(ctk.CTkFrame):
         self.sidebar.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         
         ctk.CTkLabel(self.sidebar, text="Sync Offline Viewer", font=ctk.CTkFont(size=18, weight="bold")).pack(pady=10)
-        ctk.CTkButton(self.sidebar, text="HDF5 Log-Ordner laden", command=self.load_log_folder, font=ctk.CTkFont(weight="bold")).pack(fill="x", padx=15, pady=10)
+        
+        # --- NEU: Datenbank-Suche ---
+        ctk.CTkButton(self.sidebar, text="🔍 In Datenbank suchen", command=self.open_db_browser, font=ctk.CTkFont(weight="bold"), fg_color="#2b6cb0").pack(fill="x", padx=15, pady=(10, 5))
+        
+        # --- ALTER BUTTON (als Fallback für manuelle Ordnerauswahl) ---
+        ctk.CTkButton(self.sidebar, text="📂 HDF5 manuell laden", command=self.load_log_folder).pack(fill="x", padx=15, pady=(0, 10))
         
         self.folder_label = ctk.CTkLabel(self.sidebar, text="Keine Daten geladen", text_color="gray", font=ctk.CTkFont(size=11), justify="left")
         self.folder_label.pack(fill="x", padx=15)
@@ -327,7 +321,6 @@ class SyncViewerFrame(ctk.CTkFrame):
             messagebox.showwarning("Fehler", "Keine Daten geladen. Bitte lade zuerst einen Log-Ordner.")
             return
 
-        # 1. Metadaten & Zeitstempel holen
         current_date = datetime.now().strftime("%d.%m.%Y %H:%M")
         total_epochs = len(self.time_data)
         total_time = self.time_data[-1] if total_epochs > 0 else 0
@@ -347,7 +340,6 @@ class SyncViewerFrame(ctk.CTkFrame):
         datum_str = getattr(self, 'mess_datum', 'Nicht protokolliert')
         uhrzeit_str = getattr(self, 'mess_uhrzeit', 'Nicht protokolliert')
         
-        # 2. Reale Statistiken zeilenweise berechnen
         stats_html = ""
         for i, label in enumerate(self.labels):
             if i < self.stat_data.shape[1]:
@@ -370,7 +362,6 @@ class SyncViewerFrame(ctk.CTkFrame):
                 </tr>
                 """
 
-        # 3. Vorhandene Log-Events auslesen und formatieren
         events_html = ""
         if len(self.events_time) > 0:
             for t, txt in zip(self.events_time[:15], self.events_text[:15]):
@@ -385,7 +376,6 @@ class SyncViewerFrame(ctk.CTkFrame):
         else:
             events_html = "<tr><td colspan='3' style='text-align:center; color:gray;'>Keine System-Events aufgezeichnet.</td></tr>"
 
-        # 4. Graphen-Inhalt für aktuellen Punkt für den Druck vorbereiten
         buf = BytesIO()
         orig_fig_color = self.fig.get_facecolor()
         
@@ -411,9 +401,6 @@ class SyncViewerFrame(ctk.CTkFrame):
         img_base64 = base64.b64encode(buf.read()).decode('utf-8')
         graphs_uri = f"data:image/png;base64,{img_base64}"
 
-        # ------------------------------------------------------------------
-        # NEU: Boxplot & Zeitverlauf-Diagramme im Hintergrund generieren
-        # ------------------------------------------------------------------
         boxplot_uri = self._generate_boxplot_base64_for_pdf()
         boxplot_html = ""
         if boxplot_uri:
@@ -434,7 +421,6 @@ class SyncViewerFrame(ctk.CTkFrame):
             </div>
             """
 
-        # 5. CSS Struktur
         css = """
         @media print {
             body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -462,7 +448,6 @@ class SyncViewerFrame(ctk.CTkFrame):
         .img-fluid { max-width: 100%; height: auto; display: block; margin: 0 auto; }
         """
 
-        # 6. HTML Konstruktion (mit den neuen zeitlichen Verläufen)
         html_content = f"""
         <!DOCTYPE html>
         <html lang="de">
@@ -521,7 +506,7 @@ class SyncViewerFrame(ctk.CTkFrame):
             <div class="page-break"></div>
 
             <h2>4. Signal- und Frequenzanalyse (Aktueller Punkt)</h2>
-            <p>Die nachfolgenden Diagramme dokumentieren den Zustand des aktuell in der Software angewählten Datenpunkts (Datenfenster-Index: {self.current_index} bei relativer Systemzeit: {self.time_data[self.current_index]:.2f}s).</p>
+            <p>Die nachfolgenden Diagramme dokumentieren den Zustand des aktuell in der Software angewählten Datenpunkts (Datenfenster-Index: {self.current_index} bei relativer Systemzeit: {self.time_data[self.current_index] if self.time_data else 0:.2f}s).</p>
             <div class="chart-box">
                 <div class="chart-title">Wellenform, FFT Spektrum & Spektrogramm</div>
                 <img src="{graphs_uri}" class="img-fluid" />
@@ -550,7 +535,6 @@ class SyncViewerFrame(ctk.CTkFrame):
         </html>
         """
 
-        # 7. PDF-Generierung via Microsoft Edge (Headless-Modus)
         temp_html = os.path.join(os.getcwd(), "temp_report.html")
         output_filename = f"Messbericht_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
         output_path = os.path.join(os.getcwd(), output_filename)
@@ -619,23 +603,25 @@ class SyncViewerFrame(ctk.CTkFrame):
         self.canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
 
     def load_log_folder(self):
+        """Manueller Fallback über den Windows-Ordner-Dialog."""
         initial_dir = os.path.join(os.getcwd(), "data") if os.path.exists("data") else "/"
         folder_path = filedialog.askdirectory(initialdir=initial_dir)
         if not folder_path: return
+        self._load_h5_from_path(folder_path)
+
+    def _load_h5_from_path(self, folder_path):
+        """Die ausgelagerte HDF5 Lade-Logik."""
         self.current_folder_path = folder_path
-        
         h5_path = os.path.join(folder_path, "datalog.h5")
         if not os.path.exists(h5_path):
-            messagebox.showerror("Fehler", "Ausgewählter Ordner enthält keine 'datalog.h5'!")
+            messagebox.showerror("Fehler", f"Ausgewählter Ordner enthält keine 'datalog.h5':\n{folder_path}")
             return
             
         try:
             self.h5_file = h5py.File(h5_path, "r")
             
-            # --- HIER MUSS ES HIN! ---
             self.mess_datum = self.h5_file.attrs.get('date', 'Unbekannt')
             self.mess_uhrzeit = self.h5_file.attrs.get('time', 'Unbekannt')
-            # -------------------------
             
             self.time_data = self.h5_file["time"][:]
             self.stat_data = self.h5_file["stats"][:]
@@ -690,6 +676,72 @@ class SyncViewerFrame(ctk.CTkFrame):
             
         except Exception as e:
             messagebox.showerror("Fehler", f"Konnte HDF5 nicht laden:\n{e}")
+
+    def open_db_browser(self):
+        """Öffnet das Datenbank-Suchfenster (Treeview)."""
+        db_window = ctk.CTkToplevel(self)
+        db_window.title("Messungs-Katalog durchsuchen")
+        db_window.geometry("950x400")
+        db_window.transient(self) 
+
+        search_frame = ctk.CTkFrame(db_window)
+        search_frame.pack(fill="x", padx=10, pady=10)
+        
+        ctk.CTkLabel(search_frame, text="Suchen (Datum / Kommentar):", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=10)
+        search_entry = ctk.CTkEntry(search_frame, width=350, placeholder_text="Tippen zum Filtern...")
+        search_entry.pack(side="left", padx=5)
+
+        # Tabellen-Struktur
+        columns = ("id", "Datum", "Dauer (s)", "THD (%)", "RMS (V)", "Vpp Max (V)", "Kommentar")
+        tree = ttk.Treeview(db_window, columns=columns, show="headings")
+        
+        tree.column("id", width=40, anchor="center")
+        tree.column("Datum", width=140)
+        tree.column("Dauer (s)", width=80, anchor="e")
+        tree.column("THD (%)", width=80, anchor="e")
+        tree.column("RMS (V)", width=80, anchor="e")
+        tree.column("Vpp Max (V)", width=80, anchor="e")
+        tree.column("Kommentar", width=400)
+        
+        for col in columns:
+            tree.heading(col, text=col)
+            
+        tree.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        db = MetadataDB()
+
+        def refresh_table(event=None):
+            for row in tree.get_children():
+                tree.delete(row)
+            
+            term = search_entry.get().strip()
+            records = db.search_measurements(term)
+            
+            for r in records:
+                tree.insert("", "end", iid=r["folder_path"], values=(
+                    r["id"],
+                    r["timestamp"],
+                    f"{r['duration_sec']:.1f}",
+                    f"{r['thd_mean']:.2f}",
+                    f"{r['rms_mean']:.3f}",
+                    f"{r['vpp_max']:.3f}",
+                    r["comment"]
+                ))
+
+        refresh_table()
+        search_entry.bind("<KeyRelease>", refresh_table)
+
+        def on_double_click(event):
+            item_id = tree.focus()
+            if item_id:
+                folder_path = item_id 
+                if os.path.exists(folder_path):
+                    self._load_h5_from_path(folder_path)
+                    db_window.destroy()
+                else:
+                    messagebox.showerror("Fehler", f"Der Ordner existiert nicht mehr auf der Festplatte!\nPfad: {folder_path}")
+
+        tree.bind("<Double-1>", on_double_click)
 
     def render_waterfall(self):
         self.ax_waterfall.clear()
