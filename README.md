@@ -1,33 +1,35 @@
 # RTB2004 Sync Logger & Viewer
 
-Ein leistungsstarkes Python-Tool zur synchronen Datenerfassung, Analyse und Berichterstellung von Messdaten zur Wellenspannung, aufgenommen mit Oszilloskopen wie dem Rohde & Schwarz RTB2004.
+A powerful Python tool for synchronized data acquisition, analysis, and reporting of shaft voltage measurement data, captured with oscilloscopes such as the Rohde & Schwarz RTB2004.
 
 ## Features
 
 ### 🔴 Live Datalogger
-- LAN-Verbindung via PyVISA
-- Erfassung von RMS, Mean, Std, Peak+, Peak-
+- LAN connection via PyVISA
+- Acquisition of RMS, Mean, Std, Peak+, Peak−
 - THD (Total Harmonic Distortion)
-- Pulse Counts
-- Optional: FFT & Wellenform Logging
-- Live-Plots (Waveform, FFT, THD, Statistik)
-- Event-Marker
-- Speicherung als HDF5 (.h5)
+- Pulse counts
+- Optional FFT & waveform logging
+- Live visualization (waveform, FFT, THD, statistics)
+- Event markers during measurement
+- Data storage in HDF5 format (.h5)
 
 ### 📊 Log Viewer
-- Laden von HDF5-Dateien oder via Datenbank
-- Visualisierung: Wave, FFT, Waterfall
-- Zeitleiste & Event-Sprung
-- Boxplot & Zeitverlauf-Analyse
-- PDF Export
+- Load HDF5 files or browse via database
+- Visualization: waveform, FFT, waterfall (spectrogram)
+- Timeline navigation & event jumping
+- Boxplot & time-series analysis
+- PDF export
 
-### 📑 Vergleichsbericht
-- Vergleich „ohne“ vs. „mit“ Ableitsystem
-- Automatische KPI-Auswertung (RMS, Vpp, THD, Dämpfung)
-- Wave + FFT Analyse
-- Professioneller PDF-Report
+### 📑 Comparison Report
+- Compare measurements:
+  - without vs. with discharge system
+- Automatic KPI evaluation:
+  - RMS, Vpp, THD, damping
+- Combined waveform & FFT analysis
+- Professional PDF report generation
 
-## 🧰 Technologien
+## 🧰 Technologies
 
 - Python
 - CustomTkinter
@@ -37,30 +39,32 @@ Ein leistungsstarkes Python-Tool zur synchronen Datenerfassung, Analyse und Beri
 - PyVISA
 - SQLite
 
-## 📂 Struktur
+## 📂 Project Structure
 
+```
 src/
   gui/
   utils/
 data/
+```
 
 ## ▶️ Installation
 
 pip install customtkinter numpy matplotlib pyvisa pyvisa-py h5py
 
-## ▶️ Start
+## ▶️ Run
 
 python main.py
 
-## ⚠️ Voraussetzung
+## ⚠️ Requirements
 
-- SCPI-fähiges Oszilloskop im Netzwerk
-- Microsoft Edge für PDF Export
+- SCPI-capable oscilloscope connected via network
+- Microsoft Edge (for PDF export)
 
 ## 📌 Use Case
 
-- Wellenspannungsanalyse
-- Lagerstrom-Überwachung
-- EMV Analyse
-- Vergleich von Ableitsystemen
+- Shaft voltage analysis
+- Bearing current monitoring
+- EMI / high-frequency noise analysis
+- Evaluation of shaft grounding / discharge systems
 
