@@ -4,6 +4,8 @@ import customtkinter as ctk
 from src.gui.logger_tab import SyncLoggerFrame
 from src.gui.viewer_tab import SyncViewerFrame
 from src.gui.report_tab import SyncReportFrame  # <-- NEU importiert
+from src.gui.econ_sweep_tab import EconSweepFrame
+
 
 # Design-Thema festlegen
 ctk.set_appearance_mode("System")
@@ -35,6 +37,12 @@ class UltimateSyncApp(ctk.CTk):
         # Tab 3: Vergleichsbericht
         self.report_module = SyncReportFrame(self.tab_report)  # <-- NEU initialisiert
         self.report_module.pack(fill="both", expand=True)
+
+        # Tab 4: eCON Sweep (optional, kann später aktiviert werden)
+        self.tab_econ = self.tabview.add("eCON Sweep")
+        self.econ_module = EconSweepFrame(self.tab_econ)
+        self.econ_module.pack(fill="both", expand=True)
+
 
     def on_closing(self):
         if hasattr(self, 'logger_module'):
